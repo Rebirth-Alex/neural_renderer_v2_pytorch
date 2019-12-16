@@ -1,9 +1,7 @@
 import unittest
 
-import chainer
-import chainer.gradient_check
-import chainer.testing
 import numpy as np
+import torch
 
 import neural_renderer
 
@@ -14,8 +12,8 @@ class TestPerspective(unittest.TestCase):
         v_out = [np.sqrt(3) / 10, 2 * np.sqrt(3) / 10, 10]
         vertices = np.array(v_in, 'float32')
         vertices = vertices[None, None, :]
-        transformed = neural_renderer.perspective(vertices)
-        chainer.testing.assert_allclose(transformed.data.flatten(), np.array(v_out, 'float32'))
+        transformed = neural_renderer.perspective(torch.as_tensor(vertices))
+        np.testing.assert_allclose(transformed.flatten().numpy(), np.asarray(v_out, np.float32), rtol=1e-5)
 
 
 if __name__ == '__main__':

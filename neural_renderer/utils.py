@@ -1,15 +1,15 @@
-import chainer
-import chainer.functions as cf
 import math
-import numpy as np
+
 import imageio
+import numpy as np
+import torch
 
 
 def to_gpu(data, device=None):
     if isinstance(data, tuple) or isinstance(data, list):
-        return [chainer.cuda.to_gpu(d, device) for d in data]
+        return [d.to(device) for d in data]
     else:
-        return chainer.cuda.to_gpu(data)
+        return data.cuda()
 
 
 def imread(filename):
@@ -59,8 +59,8 @@ def get_points_from_angles(distance, elevation, azimuth, degrees=True):
         if degrees:
             elevation = radians(elevation)
             azimuth = radians(azimuth)
-        return cf.stack([
-            distance * cf.cos(elevation) * cf.sin(azimuth),
-            distance * cf.sin(elevation),
-            -distance * cf.cos(elevation) * cf.cos(azimuth),
-        ]).transpose()
+        return torch.stack([
+            distance * torch.cos(elevation) * torch.sin(azimuth),
+            distance * torch.sin(elevation),
+            -distance * torch.cos(elevation) * torch.cos(azimuth),
+        ]).permute(1, 0)

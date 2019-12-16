@@ -1,4 +1,5 @@
-import chainer
+import torch
+
 
 class Light:
     pass
@@ -23,5 +24,4 @@ class SpecularLight(Light):
         if alpha is not None:
             self.alpha = alpha
         else:
-            xp = chainer.cuda.get_array_module(color)
-            self.alpha = xp.ones(color.shape[0], 'float32')
+            self.alpha = torch.ones(color.shape[0], dtype=torch.float32)

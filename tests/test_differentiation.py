@@ -1,10 +1,5 @@
 import unittest
 
-import chainer
-import chainer.functions as cf
-import chainer.gradient_check
-import chainer.testing
-import cupy as cp
 import numpy as np
 
 import neural_renderer

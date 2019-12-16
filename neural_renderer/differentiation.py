@@ -1,48 +1,39 @@
-import string
-
-import chainer
+import torch
+from torch.autograd import Function
 
 
 def pad_zeros(x, size, axis, side='both'):
-    xp = chainer.cuda.get_array_module(x)
     if axis == 1:
-        pad = xp.zeros((x.shape[0], size, x.shape[2], x.shape[3]), 'float32')
+        pad = torch.zeros((x.shape[0], size, x.shape[2], x.shape[3]), dtype=torch.float32)
     elif axis == 2:
-        pad = xp.zeros((x.shape[0], x.shape[1], size, x.shape[3]), 'float32')
+        pad = torch.zeros((x.shape[0], x.shape[1], size, x.shape[3]), dtype=torch.float32)
     elif axis == 3:
-        pad = xp.zeros((x.shape[0], x.shape[1], x.shape[2], size), 'float32')
+        pad = torch.zeros((x.shape[0], x.shape[1], x.shape[2], size), dtype=torch.float32)
     if side == 'both':
-        x = xp.concatenate((pad, x, pad), axis=axis)
+        x = torch.cat((pad, x, pad), axis)
     elif side == 'left':
-        x = xp.concatenate((pad, x), axis=axis)
+        x = torch.cat((pad, x), axis)
     elif side == 'right':
-        x = xp.concatenate((x, pad), axis=axis)
+        x = torch.cat((x, pad), axis)
     return x
 
 
 def maximum(data_right, data_left, eps=1e-4):
-    data3 = chainer.cuda.elementwise(
-        'float32 data_right, float32 data_left',
-        'float32 data_out',
-        string.Template('''
-            if (max(data_right, data_left) <= 0) {
-                data_out = 0;
-            } else if (abs(data_right - data_left) < ${eps}) {
-                data_out = 0;
-            } else if (data_right > data_left) {
-                data_out = -data_right;
-            } else {
-                data_out = data_left;
-            }
-        ''').substitute(
-            eps=eps,
-        ),
-        'function',
-    )(data_right, data_left)
+    max_map = torch.max(data_left, data_right)
+    min_map = torch.abs(data_right - data_left) < eps
+    rl_map = data_right > data_left
+    else_map = not (max_map | min_map | rl_map)
+
+    data3 = torch.zeros_like(data_right)
+    data3[max_map] = 0
+    data3[min_map] = 0
+    data3[rl_map] = -data_right[rl_map]
+    data3[else_map] = data_left[else_map]
+
     return data3
 
 
-class Differentiation(chainer.Function):
+class Differentiation(Function):
     def check_type_forward(self, in_types):
         # images: [bs, is, is, x]
         # coordinates: [bs, is, is, 2]
@@ -69,7 +60,6 @@ class Differentiation(chainer.Function):
         return images,
 
     def backward_gpu(self, inputs, gradients):
-        xp = chainer.cuda.get_array_module(inputs[0])
         images, coordinates = inputs
         grad_output = gradients[0]
         batch_size, image_size, _, num_channels = images.shape
@@ -89,7 +79,7 @@ class Differentiation(chainer.Function):
         grad_x_l = pad_zeros(grad_x_l[:, :, :, None], 1, 2, 'left') + pad_zeros(grad_x_l[:, :, :, None], 1, 2, 'right')
         grad_x = maximum(grad_x_r, grad_x_l)
 
-        grad_loss_xy = xp.concatenate((grad_x, grad_y), axis=-1)
+        grad_loss_xy = torch.cat((grad_x, grad_y), -1)
 
         return grad_images, grad_loss_xy
 

@@ -1,36 +1,35 @@
-import chainer
-import chainer.functions as cf
+import torch
+import torch.nn as nn
 
-import neural_renderer
+from neural_renderer import load_obj
 
 
-class Mesh(chainer.Link):
+class Mesh(nn.Module):
     def __init__(self, filename_obj, texture_size=4, normalization=True):
         super(Mesh, self).__init__()
 
-        with self.init_scope():
-            # load .obj
-            vertices, faces = neural_renderer.load_obj(filename_obj, normalization)
-            self.vertices = chainer.Parameter(vertices)
-            self.faces = faces
-            self.num_vertices = self.vertices.shape[0]
-            self.num_faces = self.faces.shape[0]
+        # load .obj
+        vertices, faces = load_obj(filename_obj, normalization)
+        self.vertices = torch.as_tensor(vertices)
+        self.faces = faces
+        self.num_vertices = self.vertices.shape[0]
+        self.num_faces = self.faces.shape[0]
 
-            # create textures
-            init = chainer.initializers.Normal()
-            shape = (self.num_faces, texture_size, texture_size, texture_size, 3)
-            self.textures = chainer.Parameter(init, shape)
-            self.texture_size = texture_size
+        # create textures
+        shape = (self.num_faces, texture_size, texture_size, texture_size, 3)
+        self.textures = torch.nn.Parameter(torch.nn.init.normal(torch.zeros(shape)))
+        self.texture_size = texture_size
 
-    def to_gpu(self, device=None):
-        super(Mesh, self).to_gpu(device)
-        self.faces = chainer.cuda.to_gpu(self.faces, device)
+    def to(self, *args, **kwargs):
+        super(Mesh, self).to(*args, **kwargs)
+        device, dtype, non_blocking = torch._C._nn._parse_to(*args, **kwargs)
+        self.faces = self.faces.to(device)
 
     def get_batch(self, batch_size):
         # broadcast for minibatch
-        vertices = cf.broadcast_to(self.vertices, [batch_size] + list(self.vertices.shape))
-        faces = cf.broadcast_to(self.faces, [batch_size] + list(self.faces.shape)).data
-        textures = cf.sigmoid(cf.broadcast_to(self.textures, [batch_size] + list(self.textures.shape)))
+        vertices = self.vertices.expand([batch_size] + list(self.vertices.shape))
+        faces = self.faces.expand([batch_size] + list(self.faces.shape))
+        textures = torch.sigmoid(self.textures.expand([batch_size] + list(self.textures.shape)))
         return vertices, faces, textures
 
     def set_lr(self, lr_vertices, lr_textures):

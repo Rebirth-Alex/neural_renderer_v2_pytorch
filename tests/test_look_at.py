@@ -1,9 +1,7 @@
 import unittest
 
-import chainer
-import chainer.gradient_check
-import chainer.testing
 import numpy as np
+import torch
 
 import neural_renderer
 
@@ -24,8 +22,8 @@ class TestLookAt(unittest.TestCase):
         vertices = vertices[None, None, :]
         for e, a in zip(viewpointss, answers):
             viewpoints = np.array(e, 'float32')
-            transformed = neural_renderer.look_at(vertices, viewpoints)
-            chainer.testing.assert_allclose(transformed.data.flatten(), np.array(a))
+            transformed = neural_renderer.look_at(torch.as_tensor(vertices), torch.as_tensor(viewpoints))
+            np.testing.assert_allclose(transformed.flatten().numpy(), np.array(a))
 
 
 if __name__ == '__main__':

@@ -2,8 +2,7 @@ import glob
 import os
 import unittest
 
-import chainer
-import chainer.testing
+import numpy
 
 import neural_renderer
 
@@ -39,7 +38,7 @@ class TestSaveObj(unittest.TestCase):
             images = renderer.render(vertices, faces, vertices_t, faces_t, textures).data
             image = images[0].transpose((1, 2, 0))
 
-            chainer.testing.assert_allclose(ref, image, atol=1e-2, rtol=1e-2)
+            numpy.testing.assert_allclose(ref, image, atol=1e-2, rtol=1e-2)
 
         for f in glob.glob('./tests/data/tmp*'):
             os.remove(f)

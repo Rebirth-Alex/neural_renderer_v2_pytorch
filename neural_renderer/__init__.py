@@ -1,4 +1,5 @@
-from .cross import cross
+from .differentiation import differentiation
+from .lights import *
 from .load_obj import load_obj
 from .look import look
 from .look_at import look_at
@@ -9,6 +10,5 @@ from .rasterize import rasterize, rasterize_silhouettes, rasterize_rgba, rasteri
 from .renderer import Renderer
 from .save_obj import save_obj
 from .utils import to_gpu, imread, create_textures, get_points_from_angles
-from .differentiation import differentiation
-from .lights import *
+
 __version__ = '2.0.2'

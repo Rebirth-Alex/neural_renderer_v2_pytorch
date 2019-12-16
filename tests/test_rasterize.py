@@ -5,7 +5,6 @@ import chainer
 import chainer.functions as cf
 import chainer.testing
 import numpy as np
-import cupy as cp
 import imageio
 
 import neural_renderer
