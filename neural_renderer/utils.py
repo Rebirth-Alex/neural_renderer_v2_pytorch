@@ -7,9 +7,9 @@ import torch
 
 def to_gpu(data, device=None):
     if isinstance(data, tuple) or isinstance(data, list):
-        return [d.to(device) for d in data]
+        return [torch.as_tensor(d).cuda(device) for d in data]
     else:
-        return data.cuda()
+        return torch.as_tensor(data).cuda()
 
 
 def imread(filename):
@@ -28,7 +28,7 @@ def create_textures(num_faces, texture_size=16, flatten=False):
     vertices = np.zeros((num_faces, 3, 2), 'float32')  # [:, :, XY]
     face_nums = np.arange(num_faces)
     column = face_nums % tile_width
-    row = face_nums / tile_width
+    row = face_nums // tile_width
     vertices[:, 0, 0] = column * texture_size
     vertices[:, 0, 1] = row * texture_size
     vertices[:, 1, 0] = column * texture_size

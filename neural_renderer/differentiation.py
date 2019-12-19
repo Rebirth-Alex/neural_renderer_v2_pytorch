@@ -34,32 +34,11 @@ def maximum(data_right, data_left, eps=1e-4):
 
 
 class Differentiation(Function):
-    def check_type_forward(self, in_types):
-        # images: [bs, is, is, x]
-        # coordinates: [bs, is, is, 2]
-        chainer.utils.type_check.expect(
-            in_types[0].dtype.kind == 'f',
-            in_types[0].ndim == 4,
-            in_types[0].shape[1] == in_types[0].shape[2],
-            in_types[1].dtype.kind == 'f',
-            in_types[1].ndim == 4,
-            in_types[1].shape[1] == in_types[1].shape[2],
-            in_types[1].shape[3] == 2,
-            in_types[0].shape[0] == in_types[1].shape[0],
-            in_types[0].shape[1] == in_types[1].shape[1],
-        )
 
-    def forward_cpu(self, inputs):
-        raise NotImplementedError
+    def forward(self, images, coordinates):
+        return images
 
-    def backward_cpu(self, inputs, grad_outputs):
-        raise NotImplementedError
-
-    def forward_gpu(self, inputs):
-        images, coordinates = inputs
-        return images,
-
-    def backward_gpu(self, inputs, gradients):
+    def backward(self, inputs, gradients):
         images, coordinates = inputs
         grad_output = gradients[0]
         batch_size, image_size, _, num_channels = images.shape

@@ -5,59 +5,18 @@
 
 namespace {
 template <typename scalar_t>
-__global__ void tomap_forward_cuda_kernel(
-    const scalar_t* data_in,
-    const int32_t* indices,
-    scalar_t* data_out,
-    int image_size,
-    int num_features,
-    int dim){
-        const int i = blockIdx.x * blockDim.x + threadIdx.x;
-        if (indices[i] < 0) {
-            return;
-        }
-
-        int bn = i / (image_size * image_size);
-        int pos_from = bn * num_features * dim + indices[i] * dim;
-        int pos_to = i * dim;
-        scalar_t* p1 = (scalar_t*)&data_in[pos_from];
-        scalar_t* p2 = (scalar_t*)&data_out[pos_to];
-        for (int j = 0; j < dim; j++) {
-            *p2++ = *p1++;
-        }
-    }
-
-template <typename scalar_t>
-__global__ void tomap_backward_cuda_kernel(
-    const scalar_t* grad_in,
-    const int32_t* indices,
-    scalar_t* grad_out,
-    int image_size,
-    int num_features,
-    int dim){
-        const int i = blockIdx.x * blockDim.x + threadIdx.x;
-        if (indices[i] < 0) {
-            return;
-        }
-
-        int bn = i / (image_size * image_size);
-        int pos_from = bn * num_features * dim + indices[i] * dim;
-        int pos_to = i * dim;
-        scalar_t* p1 = (scalar_t*)&grad_in[pos_from];
-        scalar_t* p2 = (scalar_t*)&grad_out[pos_to];
-        for (int j = 0; j < dim; j++) {
-             atomicAdd(p1++, *p2++);
-        }
-    }
-
-
-template <typename scalar_t>
 __global__ void mask_foreground_forward_cuda_kernel(
     const int32_t* face_index,
     const scalar_t* data_in,
     scalar_t* data_out,
+    int face_index_size,
     int dim){
         const int i = blockIdx.x * blockDim.x + threadIdx.x;
+
+        if (face_index_size <= i){
+            return;
+        }
+
         if (0 <= face_index[i]) {
             float* p1 = (float*)&data_in[i * dim];
             float* p2 = (float*)&data_out[i * dim];
@@ -72,8 +31,14 @@ __global__ void mask_foreground_backward_cuda_kernel(
     const int32_t* face_index,
     const scalar_t* grad_in,
     scalar_t* grad_out,
+    int face_index_size,
     int dim){
         const int i = blockIdx.x * blockDim.x + threadIdx.x;
+
+        if (face_index_size <= i){
+            return;
+        }
+
         if (0 <= face_index[i]) {
             float* p1 = (float*)&grad_in[i * dim];
             float* p2 = (float*)&grad_out[i * dim];
@@ -88,6 +53,7 @@ template <typename scalar_t>
 __global__ void face_index_map_forward_safe_cuda_kernel(
     const scalar_t* faces,
     int32_t* face_index,
+    int face_index_size,
     int num_faces,
     int image_size,
     float near,
@@ -96,6 +62,9 @@ __global__ void face_index_map_forward_safe_cuda_kernel(
     float eps
     ){
         const int i = blockIdx.x * blockDim.x + threadIdx.x;
+        if (i => face_index_size){
+            return;
+        }
 
         const int is = image_size;
         const int nf = num_faces;
@@ -106,7 +75,7 @@ __global__ void face_index_map_forward_safe_cuda_kernel(
         const float yp = (2. * yi + 1 - is) / is;
         const float xp = (2. * xi + 1 - is) / is;
 
-        float* face = (float*)&faces[bn * nf * 9];
+        scalar_t* face = (scalar_t*)&faces[bn * nf * 9];
         float depth_min = far;
         int face_index_min = -1;
         for (int fn = 0; fn < nf; fn++) {
@@ -278,13 +247,20 @@ __global__ void compute_weight_map_cuda_kernel(
     const scalar_t* faces,
     const int32_t* face_index_map,
     const scalar_t* weight_map,
+    int face_index_size,
     int num_faces,
     int image_size
     ){
         const int i = blockIdx.x * blockDim.x + threadIdx.x;
 
+        if (i => face_index_size){
+            return;
+        }
+
         const int fi = face_index_map[i];
-        if (fi < 0) return;
+        if (fi < 0) {
+            return;
+        }
 
         const int is = image_size;
         const int nf = num_faces;
@@ -333,76 +309,22 @@ __global__ void compute_weight_map_cuda_kernel(
 
 
 
-at::Tensor tomap_forward_cuda(
-        at::Tensor data_in,
-        at::Tensor indices,
-        at::Tensor data_out,
-        int image_size,
-        int num_features,
-        int dim) {
-
-    const int threads = 1024;
-    const dim3 blocks ((image_size / 3 - 1) / threads + 1);
-
-    AT_DISPATCH_FLOATING_TYPES(data_in.type(), "tomap_forward_cuda", ([&] {
-      tomap_forward_cuda_kernel<scalar_t><<<blocks, threads>>>(
-          data_in.data<scalar_t>(),
-          indices.data<int32_t>(),
-          data_out.data<scalar_t>(),
-          image_size,
-          num_features,
-          dim);
-      }));
-
-    cudaError_t err = cudaGetLastError();
-    if (err != cudaSuccess)
-            printf("Error in tomap_forward_cuda: %s\n", cudaGetErrorString(err));
-    return data_out;
-}
-
-
-at::Tensor tomap_backward_cuda(
-        at::Tensor grad_in,
-        at::Tensor indices,
-        at::Tensor grad_out,
-        int image_size,
-        int num_features,
-        int dim) {
-
-    const int threads = 1024;
-    const dim3 blocks ((image_size / 3 - 1) / threads + 1);
-
-    AT_DISPATCH_FLOATING_TYPES(grad_in.type(), "tomap_backward_cuda", ([&] {
-      tomap_backward_cuda_kernel<scalar_t><<<blocks, threads>>>(
-          grad_in.data<scalar_t>(),
-          indices.data<int32_t>(),
-          grad_out.data<scalar_t>(),
-          image_size,
-          num_features,
-          dim);
-      }));
-
-    cudaError_t err = cudaGetLastError();
-    if (err != cudaSuccess)
-            printf("Error in tomap_backward_cuda: %s\n", cudaGetErrorString(err));
-    return grad_in;
-}
-
-
 at::Tensor mask_foreground_forward_cuda(
         at::Tensor face_index,
         at::Tensor data_in,
         at::Tensor data_out,
         int dim) {
 
+    const int face_index_size = face_index_map.reshape(-1,).size(0)
     const int threads = 1024;
-    const dim3 blocks ((data_in.size(0) / 3 - 1) / threads + 1);
+    const dim3 blocks ((face_index_size - 1) / threads +1);
 
     AT_DISPATCH_FLOATING_TYPES(data_in.type(), "mask_foreground_forward_cuda", ([&] {
       mask_foreground_forward_cuda_kernel<scalar_t><<<blocks, threads>>>(
           face_index.data<int32_t>(),
           data_in.data<scalar_t>(),
           data_out.data<scalar_t>(),
+          face_index_size,
           dim);
       }));
 
@@ -440,13 +362,17 @@ at::Tensor face_index_map_forward_safe_cuda(
         at::Tensor faces, at::Tensor face_index, int num_faces,
         int image_size, float near, float far, int draw_backside,
         float eps){
+
     const int threads = 1024;
-    const dim3 blocks ((faces.size(0) / 3 - 1) / threads + 1);
+    const int face_index_size = face_index.size(0);
+    const dim3 blocks ((face_index_size - 1) / threads +1);
+
 
     AT_DISPATCH_FLOATING_TYPES(faces.type(), "face_index_map_forward_safe_cuda", ([&] {
       face_index_map_forward_safe_cuda_kernel<scalar_t><<<blocks, threads>>>(
           faces.data<scalar_t>(),
           face_index.data<int32_t>(),
+          face_index_size,
           num_faces,
           image_size,
           near,
@@ -493,13 +419,15 @@ at::Tensor compute_weight_map_cuda(
         at::Tensor faces, at::Tensor face_index_map, at::Tensor weight_map,
         int num_faces, int image_size){
             const int threads = 1024;
-    const dim3 blocks ((faces.size(0) / 3 - 1) / threads + 1);
+    const int face_index_size = face_index_map.size(0);
+    const dim3 blocks ((face_index_size - 1) / threads +1);
 
     AT_DISPATCH_FLOATING_TYPES(faces.type(), "compute_weight_map_cuda", ([&] {
       compute_weight_map_cuda_kernel<scalar_t><<<blocks, threads>>>(
           faces.data<scalar_t>(),
           face_index_map.data<int32_t>(),
           weight_map.data<scalar_t>(),
+          face_index_size,
           num_faces,
           image_size);
       }));

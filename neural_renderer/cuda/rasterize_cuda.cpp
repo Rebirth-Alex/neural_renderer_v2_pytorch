@@ -7,15 +7,6 @@
 #define CHECK_INPUT(x) CHECK_CUDA(x); CHECK_CONTIGUOUS(x)
 
 /// CUDA kernel definitions
-at::Tensor tomap_forward_cuda(
-        at::Tensor data_in, at::Tensor indices, at::Tensor data_out,
-        int image_size, int num_features, int dim);
-
-
-at::Tensor tomap_backward_cuda(
-        at::Tensor grad_in, at::Tensor indices, at::Tensor grad_out,
-        int image_size, int num_features, int dim);
-
 at::Tensor mask_foreground_forward_cuda(
         at::Tensor face_index, at::Tensor data_in,
         at::Tensor data_out, int dim);
@@ -41,28 +32,6 @@ at::Tensor compute_weight_map_cuda(
 
 
 // Wrapper implementations
-at::Tensor tomap_forward(
-        at::Tensor data_in, at::Tensor indices, at::Tensor data_out,
-        int image_size, int num_features, int dim) {
-
-    CHECK_INPUT(data_in);
-    CHECK_INPUT(indices);
-    CHECK_INPUT(data_out);
-
-    return tomap_forward_cuda(data_in, indices, data_out, image_size, num_features, dim);
-}
-
-at::Tensor tomap_backward(
-        at::Tensor grad_in, at::Tensor indices, at::Tensor grad_out,
-        int image_size, int num_features, int dim) {
-
-    CHECK_INPUT(grad_in);
-    CHECK_INPUT(indices);
-    CHECK_INPUT(grad_out);
-
-    return tomap_backward_cuda(grad_in, indices, grad_out, image_size, num_features, dim);
-}
-
 at::Tensor mask_foreground_forward(
         at::Tensor face_index, at::Tensor data_in, at::Tensor data_out, int dim) {
 
@@ -121,8 +90,6 @@ at::Tensor compute_weight_map_c(
 
 
 PYBIND11_MODULE(TORCH_EXTENSION_NAME, m) {
-    m.def("tomap_forward", &tomap_forward, "TOMAP_FORWARD (CUDA)");
-    m.def("tomap_backward", &tomap_backward, "TOMAP_BACKWARD (CUDA)");
     m.def("mask_foreground_forward", &mask_foreground_forward, "MASK_FOREGROUND_FORWARD (CUDA)");
     m.def("mask_foreground_backward", &mask_foreground_backward, "MASK_FOREGROUND_BACKWARD (CUDA)");
     m.def("face_index_map_forward_safe", &face_index_map_forward_safe, "FACE_INDEX_MAP_FORWARD_SAFE (CUDA)");

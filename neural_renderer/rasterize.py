@@ -1,9 +1,6 @@
-import functools
-
 import torch
 import torch.nn.functional as F
-from neural_renderer.cuda.rasterize_cuda import tomap_forward, tomap_backward, \
-    mask_foreground_forward, mask_foreground_backward, face_index_map_forward_safe, \
+from neural_renderer.cuda.rasterize_cuda import face_index_map_forward_safe, \
     face_index_map_forward_unsafe, compute_weight_map_c
 from torch.autograd import Function
 
@@ -15,7 +12,7 @@ from . import lights as light_lib
 
 # camera
 DEFAULT_NEAR = 0.1
-DEFAULT_FAR = 100
+DEFAULT_FAR = 100.0
 
 # rendering
 DEFAULT_IMAGE_SIZE = 256
@@ -30,71 +27,17 @@ DEFAULT_EPS = 1e-5
 # Utility functions
 
 
-class ToMap(Function):
-    """
-    Test code:
-    import chainer.gradient_check
-    data_in = cp.random.randn(*(16, 128, 3, 5)).astype('float32')
-    indices = cp.random.randint(-1, 128, size=(16, 8, 8)).astype('int32')
-    grad_out = cp.random.randn(16, 8, 8, 3, 5).astype('float32')
-    data_out = ToMap()(data_in, indices)
-    for i1 in range(16):
-        for i2 in range(8):
-            for i3 in range(8):
-                i4 = indices[i1, i2, i3]
-                if i4 < 0:
-                    chainer.testing.assert_allclose(data_out[i1, i2, i3].data, data_out[i1, i2, i3].data * 0)
-                else:
-                    chainer.testing.assert_allclose(data_out[i1, i2, i3].data, data_in[i1, i4])
-    chainer.gradient_check.check_backward(ToMap(), (data_in, indices), grad_out, no_grads=(False, True), rtol=1e-2, atol=1e-03)
-    """
+def to_map(data_in, indices):
+    data_in, indices = data_in.contiguous(), indices.contiguous()
+    data_out = torch.zeros((*indices.shape[:3], *data_in.shape[2:]), dtype=torch.float32)
+    data_out = data_out.contiguous().to(data_in.device)
 
-    """
-    def check_type_forward(self, in_types):
-        chainer.utils.type_check.expect(
-            in_types[0].dtype.kind == 'f',
-            in_types[1].dtype.kind == 'i',
-            in_types[0].shape[0] == in_types[1].shape[0],
-        )
-    """
+    indices_mask = indices >= 0
 
-    def forward_gpu(self, inputs):
-        # data_in: [bs, nf, ...]
-        # indices: [bs, is, is]
-        # data_out: [bs, is, is, ..]
-        data_in, indices = [inp.contiguous() for inp in inputs]
-        data_out = torch.zeros(tuple(list(indices.shape[:3]) + list(data_in.shape[2:])),
-                               dtype=torch.float32).contiguous()
+    for b in range(data_in.shape[0]):
+        data_out[b, indices_mask[b]] = data_in[b, indices[b, indices_mask[b]].cpu().numpy(), :]
 
-        tomap_forward(data_in=data_in,
-                      indices=indices,
-                      data_out=data_out,
-                      image_size=indices.shape[1],
-                      num_features=data_in.shape[1],
-                      dim=functools.reduce(lambda x, y: x * y, data_in.shape[2:])
-                      )
-        return data_out,
-
-    def backward_gpu(self, inputs, gradients):
-        # data_in: [bs, nf, ...]
-        # indices: [bs, is, is]
-        # data_out: [bs, is, is, ..]
-        data_in_shape = inputs[0].shape
-        indices = inputs[1].contiguous()
-        grad_out = gradients[0].contiguous()
-        grad_in = torch.zeros(data_in_shape, dtype=torch.float32).contiguous()
-
-        tomap_backward(grad_in=grad_in,
-                       indices=indices,
-                       grad_out=grad_out,
-                       image_size=indices.shape[1],
-                       num_features=data_in_shape[1],
-                       dim=functools.reduce(lambda x, y: x * y, data_in_shape[2:]))
-        return grad_in, None
-
-
-def to_map(data, indices):
-    return ToMap()(data, indices)
+    return data_out
 
 
 class MaskForeground(Function):
@@ -117,26 +60,20 @@ class MaskForeground(Function):
         mask_foreground, (data_in, masks), grad_out, no_grads=(False, True), rtol=1e-2, atol=1e-03)
     """
 
-    def forward_gpu(self, inputs):
-        data_in, face_index_map = [inp.contiguous() for inp in inputs]
-        if data_in.ndimensions() == 3:
-            dim = 1
-        else:
-            dim = functools.reduce(lambda x, y: x * y, data_in.shape[3:])
-        data_out = torch.zeros(data_in.shape, dtype=torch.float32).contiguous()
-        mask_foreground_forward(face_index_map, data_in, data_out, dim)
+    def forward(self, data_in, face_index_map):
+        data_in, face_index_map = data_in.contiguous(), face_index_map.contiguous()
+        data_out = torch.zeros(data_in.shape, dtype=torch.float32, device=data_in.device).contiguous()
+        for b in range(data_in.shape[0]):
+            data_out[b][face_index_map[b] >= 0] = data_in[b][face_index_map[b] >= 0]
 
-        return data_out,
+        return data_out
 
-    def backward_gpu(self, inputs, gradients):
+    def backward(self, inputs, gradients):
         face_index_map = inputs[1].contiguous()
         grad_out = gradients[0].contiguous()
         grad_in = torch.zeros(grad_out.shape, dtype=torch.float32).contiguous()
-        if grad_in.ndimension() == 3:
-            dim = 1
-        else:
-            dim = functools.reduce(lambda x, y: x * y, grad_in.shape[3:])
-        mask_foreground_backward(face_index_map, grad_in, grad_out, dim)
+        for b in range(grad_in.shape[0]):
+            grad_in[b][face_index_map[b] >= 0] = grad_out[b][face_index_map[b] >= 0]
 
         return grad_in, None
 
@@ -157,44 +94,44 @@ class FaceIndexMap(Function):
         self.far = far
         self.draw_backside = draw_backside
 
-    def forward_gpu(self, inputs):
+    def forward(self, inputs, **kwargs):
         return self.forward_gpu_safe(inputs)
         # return self.forward_gpu_unsafe(inputs)
 
     def forward_gpu_safe(self, inputs):
-        faces = inputs[0]
+        faces = inputs
         batch_size, num_faces = faces.shape[:2]
         faces = faces.contiguous()
 
-        loop = torch.arange(batch_size * self.image_size * self.image_size).type(torch.int32)
-        face_index = torch.zeros_like(faces)
+        face_index = torch.zeros((batch_size, self.image_size, self.image_size), dtype=torch.int32).reshape((-1,)) - 1
+        face_index = face_index.to(faces.device)
         face_index_map = face_index_map_forward_safe(faces, face_index, self.num_faces, self.image_size,
                                                      self.near, self.far, int(self.draw_backside), 1e-8)
         face_index_map = face_index_map.reshape((batch_size, self.image_size, self.image_size))
 
-        return face_index_map,
+        return face_index_map
 
     def forward_gpu_unsafe(self, inputs):
         faces = inputs[0]
         batch_size, num_faces = faces.shape[:2]
         faces = faces.contiguous()
 
-        loop = torch.arange(batch_size * self.num_faces).type(torch.int32)
-        face_index_map = torch.zeros((batch_size, self.image_size, self.image_size), dtype=torch.int32) - 1
+        face_index = torch.zeros((batch_size, self.image_size, self.image_size), dtype=torch.int32).reshape((-1,)) - 1
         depth_map = torch.zeros((batch_size, self.image_size, self.image_size), dtype=torch.float32) * self.far + 1
         lock = torch.zeros((batch_size, self.image_size, self.image_size), dtype=torch.int32)
 
-        face_index_map = face_index_map_forward_unsafe(faces, face_index_map, depth_map, lock,
+        face_index_map = face_index_map_forward_unsafe(faces, face_index, depth_map, lock,
                                                        self.num_faces, self.image_size, self.near, self.far,
                                                        int(self.draw_backside), 1e-8)
         face_index_map = face_index_map.reshape((batch_size, self.image_size, self.image_size))
 
-        return face_index_map,
+        return face_index_map
 
 
 def compute_face_index_map(faces, image_size, near, far, draw_backside):
     batch_size, num_faces = faces.shape[:2]
-    face_index_map = FaceIndexMap(num_faces, image_size, near, far, draw_backside)(faces).data
+    fim = FaceIndexMap(num_faces, image_size, near, far, draw_backside)
+    face_index_map = fim(faces)
     return face_index_map
 
 
@@ -202,9 +139,7 @@ def compute_weight_map(faces, face_index_map):
     batch_size, num_faces = faces.shape[:2]
     image_size = face_index_map.shape[1]
 
-    weight_map = torch.zeros((batch_size * image_size * image_size, 3), dtype=torch.float32)
-    if isinstance(faces, torch.Tensor):
-        faces = faces.data
+    weight_map = torch.zeros((batch_size * image_size * image_size, 3), dtype=torch.float32).to(faces.device)
     faces = faces.contiguous()
     face_index_map = face_index_map.contiguous()
     weight_map = weight_map.contiguous()
@@ -245,29 +180,21 @@ def sample_textures(faces, faces_textures, textures, face_index_map, weight_map,
     # weight_map: [bs, is, is, 3]
     batch_size, num_faces = faces.shape[:2]
     texture_height, texture_width = textures.shape[2:]
-    if isinstance(faces, torch.Tensor):
-        faces = faces.data.numpy()
-    if isinstance(faces_textures, torch.Tensor):
-        faces_textures = faces_textures.data.numpy()
-    if isinstance(face_index_map, torch.Tensor):
-        face_index_map = face_index_map.data.numpy()
-    if isinstance(weight_map, torch.Tensor):
-        weight_map = weight_map.data
 
     textures = textures.permute((0, 2, 3, 1))  # [bs, h, w, 3]
     textures = torch.reshape(textures, (batch_size, texture_height * texture_width, 3))  # [bs, h * w, 3]
-    faces_z_map = to_map(faces[:, :, :, 2], face_index_map).data  # [bs, is, is, 3]
-    vertices_textures_map = to_map(faces_textures, face_index_map).data  # [bs, is, is, 3, 2]
+    faces_z_map = to_map(faces[:, :, :, 2], face_index_map)  # [bs, is, is, 3]
+    vertices_textures_map = to_map(faces_textures, face_index_map)  # [bs, is, is, 3, 2]
     depth_map = 1. / (weight_map / faces_z_map).sum(-1)  # [bs, is, is]
 
     # -> [bs, is, is, 2]
-    vertices_textures_map_original = vertices_textures_map.copy()
+    vertices_textures_map_original = vertices_textures_map.clone()
     vertices_textures_map = (
             weight_map[:, :, :, :, None] * vertices_textures_map / faces_z_map[:, :, :, :, None]).sum(-2)
     vertices_textures_map = vertices_textures_map * depth_map[:, :, :, None]  # [bs, is, is, 2]
-    vertices_textures_map = torch.max(vertices_textures_map, vertices_textures_map_original.min(-2))
-    vertices_textures_map = torch.min(vertices_textures_map, vertices_textures_map_original.max(-2) - eps)
-    vertices_textures_map = mask_foreground(vertices_textures_map, face_index_map).data
+    vertices_textures_map = torch.max(vertices_textures_map, vertices_textures_map_original.min(-2).values)
+    vertices_textures_map = torch.min(vertices_textures_map, vertices_textures_map_original.max(-2).values - eps)
+    vertices_textures_map = mask_foreground(vertices_textures_map, face_index_map)
 
     x_f = vertices_textures_map[:, :, :, 0]
     y_f = vertices_textures_map[:, :, :, 1]
@@ -275,6 +202,8 @@ def sample_textures(faces, faces_textures, textures, face_index_map, weight_map,
     y_f_f = torch.floor(y_f)
     x_c_f = x_f_f + 1
     y_c_f = y_f_f + 1
+    # x_c_f = torch.clamp(x_f_f + 1, 0, texture_width - 1)
+    # y_c_f = torch.clamp(y_f_f + 1, 0, texture_height - 1)
     x_f_i = x_f_f.type(torch.int32)
     y_f_i = y_f_f.type(torch.int32)
     x_c_i = x_c_f.type(torch.int32)
@@ -285,10 +214,16 @@ def sample_textures(faces, faces_textures, textures, face_index_map, weight_map,
     vtm2 = (y_f_i * texture_width + x_c_i)  # [bs, is, is]
     vtm3 = (y_c_i * texture_width + x_f_i)  # [bs, is, is]
     vtm4 = (y_c_i * texture_width + x_c_i)  # [bs, is, is]
-    w1 = (y_c_f - y_f) * (x_c_f - x_f)  # [bs * is * is]
+    w1 = (y_c_f - y_f) * (x_c_f - x_f)  # [bs, is, is]
     w2 = (y_c_f - y_f) * (x_f - x_f_f)  # [bs, is, is]
     w3 = (y_f - y_f_f) * (x_c_f - x_f)  # [bs, is, is]
     w4 = (y_f - y_f_f) * (x_f - x_f_f)  # [bs, is, is]
+    # s = w1 + w2 + w3 + w4
+    # w1 /= s
+    # w2 /= s
+    # w3 /= s
+    # w4 /= s
+
     images = (
             w1[:, :, :, None] * to_map(textures, vtm1) +
             w2[:, :, :, None] * to_map(textures, vtm2) +
@@ -318,17 +253,17 @@ def compute_normal_map(vertices, face_indices, faces, face_index_map, weight_map
     v12 = torch.reshape(v12, (-1, 3))
     n = torch.cross(v01, v12)
     n = torch.reshape(n, (faces.shape[0], faces.shape[1], 3))  # [bs, nf, 3]
-    m = torch.zeros((face_indices.shape[0], vertices.shape[1]), dtype=torch.float32)  # [nf, nv]
-    m[torch.arange(m.shape[0]), face_indices[:, 0]] = 1
-    m[torch.arange(m.shape[0]), face_indices[:, 1]] = 1
-    m[torch.arange(m.shape[0]), face_indices[:, 2]] = 1
-    n = n.transpose((0, 2, 1))  # [bs, 3, nf]
+    m = torch.zeros((face_indices.shape[0], vertices.shape[1]), dtype=torch.float32, device=vertices.device)  # [nf, nv]
+    m[torch.arange(m.shape[0]), face_indices[:, 0].cpu().numpy()] = 1
+    m[torch.arange(m.shape[0]), face_indices[:, 1].cpu().numpy()] = 1
+    m[torch.arange(m.shape[0]), face_indices[:, 2].cpu().numpy()] = 1
+    n = n.permute((0, 2, 1))  # [bs, 3, nf]
     n = torch.reshape(n, (-1, n.shape[-1]))  # [bs * 3, nf]
     n = torch.matmul(n, m)
     n = torch.reshape(n, (faces.shape[0], 3, vertices.shape[1]))  # [bs, 3, nv]
-    n = n.transpose((0, 2, 1))
-    n = F.normalize(n, axis=2)  # [bs, nv, 3]
-    n = n[:, face_indices]  # [bs, nv, 3, 3]
+    n = n.permute((0, 2, 1))
+    n = F.normalize(n, dim=2)  # [bs, nv, 3]
+    n = n[:, face_indices.cpu().numpy()]  # [bs, nv, 3, 3]
 
     normal_map = to_map(n, face_index_map)  # [bs, is, is, 3, 3]
     if smooth:
@@ -396,8 +331,8 @@ def rasterize_all(
         image_size *= 2
 
     # -> [batch_size, num_faces, 3, 3]
-    face_indices = faces.copy()
-    faces = vertices[:, faces]
+    face_indices = faces.clone()
+    faces = vertices[:, faces.cpu().numpy()]
 
     # -> [batch_size, num_faces, 3, 3]
     face_index_map = compute_face_index_map(faces, image_size, near, far, draw_backside)
@@ -411,18 +346,19 @@ def rasterize_all(
 
     if draw_rgb:
         # -> [batch_size, num_faces, 3, 3]
-        faces_textures = vertices_textures[:, faces_textures]
+        faces_textures = vertices_textures[:, faces_textures.cpu().numpy()]
 
         # -> [batch_size, image_size, image_size, 3]
         rgb_map = sample_textures(faces, faces_textures, textures, face_index_map, weight_map, eps)
 
         if lights is not None:
             normal_map = compute_normal_map(vertices, face_indices, faces, face_index_map, weight_map)
-            color_weight_map = torch.as_tensor(torch.zeros_like(normal_map, dtype=torch.float32))
+            color_weight_map = torch.as_tensor(torch.zeros_like(normal_map, dtype=torch.float32, device=rgb_map.device))
             for light in lights:
+                light.to(rgb_map.device)
                 if isinstance(light, light_lib.AmbientLight):
                     color_weight_map += light.color[:, None, None, :].expand(color_weight_map.shape)
-                if isinstance(light, light_lib.DirectionalLight):
+                elif isinstance(light, light_lib.DirectionalLight):
                     # [bs, is, is]
                     intensity = torch.sum(-light.direction[:, None, None, :].expand(normal_map.shape) * normal_map, -1)
                     if light.backside:
@@ -432,15 +368,15 @@ def rasterize_all(
                     intensity = intensity[:, :, :, None].expand(color_weight_map.shape)
                     color = light.color[:, None, None, :].expand(color_weight_map.shape)
                     color_weight_map += intensity * color
-                if isinstance(light, light_lib.SpecularLight):
+                elif isinstance(light, light_lib.SpecularLight):
                     # [bs, is, is]
-                    direction_eye = torch.as_tensor([0, 0, 1], dtype=torch.float32)
+                    direction_eye = torch.as_tensor([0, 0, 1], dtype=torch.float32, device=rgb_map.device)
                     intensity = torch.sum(-direction_eye[None, None, None, :] * normal_map, -1)
                     if light.backside:
                         intensity = torch.abs(intensity)
                     else:
                         intensity = torch.relu(intensity)
-                    intensity **= light.alpha[:, None, None]
+                    intensity = intensity ** light.alpha[:, None, None]
                     intensity = intensity[:, :, :, None].expand(color_weight_map.shape)
                     color = light.color[:, None, None, :].expand(color_weight_map.shape)
                     color_weight_map += intensity * color
@@ -448,7 +384,7 @@ def rasterize_all(
 
         # blend backgrounds
         if backgrounds is not None:
-            backgrounds = backgrounds.transpose((0, 2, 3, 1))
+            backgrounds = backgrounds.permute((0, 2, 3, 1))
             rgb_map = blend_backgrounds(face_index_map, rgb_map, backgrounds)
 
     # -> [batch_size, 1, image_size, image_size]
@@ -472,13 +408,15 @@ def rasterize_all(
         images = depth_map
     elif not draw_rgb and not draw_silhouettes and not draw_depth:
         raise Exception
+    else:
+        raise Exception
 
     # -> [batch_size, image_size, image_size, 2]
     coordinate_map = compute_coordinate_map(faces, face_index_map, weight_map)
 
     # -> [batch_size, 3, image_size, image_size]
-    images = differentiation.differentiation(images, coordinate_map)
-    images = images[:, ::-1, ::-1, :].transpose((0, 3, 1, 2))
+    images = differentiation(images, coordinate_map)
+    images = images.permute((0, 3, 1, 2))   # Images are upside-down and right-to-left. Needs flipping
 
     # down sampling
     if anti_aliasing:

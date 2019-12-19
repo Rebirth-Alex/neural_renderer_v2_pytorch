@@ -7,15 +7,16 @@ def look_at(vertices, viewpoints, at=None, up=None):
     "Look at" transformation of vertices.
     """
     assert (vertices.ndim == 3)
+    device = vertices.device
 
     batch_size = vertices.shape[0]
     if at is None:
-        at = torch.as_tensor([0, 0, 0], dtype=torch.float32)
+        at = torch.as_tensor([0, 0, 0], dtype=torch.float32, device=device)
     if up is None:
-        up = torch.as_tensor([0, 1, 0], dtype=torch.float32)
+        up = torch.as_tensor([0, 1, 0], dtype=torch.float32, device=device)
 
     if isinstance(viewpoints, list) or isinstance(viewpoints, tuple):
-        viewpoints = torch.as_tensor(viewpoints, dtype=torch.float32)
+        viewpoints = torch.as_tensor(viewpoints, dtype=torch.float32, device=device)
     if viewpoints.ndim == 1:
         viewpoints = viewpoints[None, :].expand((batch_size, *viewpoints.shape))
     if at.ndim == 1:

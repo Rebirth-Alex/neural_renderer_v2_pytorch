@@ -3,8 +3,9 @@ import torch
 
 def perspective(vertices, angle=30.):
     assert (vertices.ndim == 3)
+    device = vertices.device
     if isinstance(angle, float) or isinstance(angle, int):
-        angle = torch.as_tensor(angle, dtype=torch.float32)
+        angle = torch.as_tensor(angle, dtype=torch.float32, device=device)
     angle = angle / 180. * 3.1416
     angle = angle[None].expand((vertices.shape[0],))
 
