@@ -59,10 +59,11 @@ __global__ void face_index_map_forward_safe_cuda_kernel(
     float near,
     float far,
     int draw_backside,
-    float eps
+    float eps,
+    float depth_min_delta
     ){
         const int i = blockIdx.x * blockDim.x + threadIdx.x;
-        if (i => face_index_size){
+        if (face_index_size <= i){
             return;
         }
 
@@ -141,7 +142,7 @@ __global__ void face_index_map_forward_safe_cuda_kernel(
             }
 
             /* check z-buffer */
-            if (zp <= depth_min) {
+            if (zp <= depth_min - depth_min_delta) {
                 depth_min = zp;
                 face_index_min = fn;
             }
@@ -253,7 +254,7 @@ __global__ void compute_weight_map_cuda_kernel(
     ){
         const int i = blockIdx.x * blockDim.x + threadIdx.x;
 
-        if (i => face_index_size){
+        if (face_index_size <= i){
             return;
         }
 
@@ -308,14 +309,13 @@ __global__ void compute_weight_map_cuda_kernel(
 }
 
 
-
 at::Tensor mask_foreground_forward_cuda(
         at::Tensor face_index,
         at::Tensor data_in,
         at::Tensor data_out,
         int dim) {
 
-    const int face_index_size = face_index_map.reshape(-1,).size(0)
+    const int face_index_size = face_index.size(0) * face_index.size(1) * face_index.size(2);
     const int threads = 1024;
     const dim3 blocks ((face_index_size - 1) / threads +1);
 
@@ -339,15 +339,16 @@ at::Tensor mask_foreground_backward_cuda(
         at::Tensor grad_in,
         at::Tensor grad_out,
         int dim) {
-
+    const int face_index_size = face_index.size(0) * face_index.size(1) * face_index.size(2);
     const int threads = 1024;
-    const dim3 blocks ((grad_in.size(0) / 3 - 1) / threads + 1);
+    const dim3 blocks ((face_index_size / 3 - 1) / threads + 1);
 
     AT_DISPATCH_FLOATING_TYPES(grad_in.type(), "mask_foreground_backward_cuda", ([&] {
       mask_foreground_backward_cuda_kernel<scalar_t><<<blocks, threads>>>(
           face_index.data<int32_t>(),
           grad_in.data<scalar_t>(),
           grad_out.data<scalar_t>(),
+          face_index_size,
           dim);
       }));
 
@@ -361,7 +362,7 @@ at::Tensor mask_foreground_backward_cuda(
 at::Tensor face_index_map_forward_safe_cuda(
         at::Tensor faces, at::Tensor face_index, int num_faces,
         int image_size, float near, float far, int draw_backside,
-        float eps){
+        float eps, float depth_min_delta){
 
     const int threads = 1024;
     const int face_index_size = face_index.size(0);
@@ -378,7 +379,8 @@ at::Tensor face_index_map_forward_safe_cuda(
           near,
           far,
           draw_backside,
-          eps);
+          eps,
+          depth_min_delta);
       }));
 
     cudaError_t err = cudaGetLastError();

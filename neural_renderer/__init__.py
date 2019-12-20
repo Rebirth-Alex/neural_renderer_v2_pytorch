@@ -1,4 +1,3 @@
-from .differentiation import differentiation
 from .lights import *
 from .load_obj import load_obj
 from .look import look

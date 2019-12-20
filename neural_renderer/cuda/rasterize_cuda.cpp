@@ -18,7 +18,7 @@ at::Tensor mask_foreground_backward_cuda(
 at::Tensor face_index_map_forward_safe_cuda(
         at::Tensor faces, at::Tensor face_index, int num_faces,
         int image_size, float near, float far, int draw_backside,
-        float eps);
+        float eps, float depth_min_delta);
 
 at::Tensor face_index_map_forward_unsafe_cuda(
         at::Tensor faces, at::Tensor face_index_map, at::Tensor depth_map,
@@ -55,12 +55,13 @@ at::Tensor mask_foreground_backward(
 at::Tensor face_index_map_forward_safe(
         at::Tensor faces, at::Tensor face_index, int num_faces,
         int image_size, float near, float far, int draw_backside,
-        float eps) {
+        float eps, float depth_min_delta) {
 
     CHECK_INPUT(faces);
     CHECK_INPUT(face_index);
 
-    return face_index_map_forward_safe_cuda(faces, face_index, num_faces, image_size, near, far, draw_backside, eps);
+    return face_index_map_forward_safe_cuda(faces, face_index, num_faces, image_size, near,
+                                            far, draw_backside, eps, depth_min_delta);
 }
 
 at::Tensor face_index_map_forward_unsafe(

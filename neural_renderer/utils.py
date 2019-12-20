@@ -9,7 +9,7 @@ def to_gpu(data, device=None):
     if isinstance(data, tuple) or isinstance(data, list):
         return [torch.as_tensor(d).cuda(device) for d in data]
     else:
-        return torch.as_tensor(data).cuda()
+        return torch.as_tensor(data).cuda(device)
 
 
 def imread(filename):
@@ -64,3 +64,34 @@ def get_points_from_angles(distance, elevation, azimuth, degrees=True):
             distance * torch.sin(elevation),
             -distance * torch.cos(elevation) * torch.cos(azimuth),
         ]).permute(1, 0)
+
+
+def pad_zeros(x, size, axis, side='both'):
+    if axis == 1:
+        pad = torch.zeros((x.shape[0], size, x.shape[2], x.shape[3]), dtype=torch.float32, device=x.device)
+    elif axis == 2:
+        pad = torch.zeros((x.shape[0], x.shape[1], size, x.shape[3]), dtype=torch.float32, device=x.device)
+    elif axis == 3:
+        pad = torch.zeros((x.shape[0], x.shape[1], x.shape[2], size), dtype=torch.float32, device=x.device)
+    if side == 'both':
+        x = torch.cat((pad, x, pad), axis)
+    elif side == 'left':
+        x = torch.cat((pad, x), axis)
+    elif side == 'right':
+        x = torch.cat((x, pad), axis)
+    return x
+
+
+def maximum(data_right, data_left, eps=1e-4):
+    max_map = torch.max(data_left, data_right) <= 0
+    min_map = torch.abs(data_right - data_left) < eps
+    rl_map = data_right > data_left
+    else_map = ~(max_map | min_map | rl_map)
+
+    data3 = torch.zeros_like(data_right)
+    data3[max_map] = 0
+    data3[min_map] = 0
+    data3[rl_map] = -data_right[rl_map]
+    data3[else_map] = data_left[else_map]
+
+    return data3

@@ -1,15 +1,17 @@
+import os
 import unittest
 
 import imageio
 import numpy as np
+import pylab
 import torch
-import torch.nn.functional as F
+from torch.nn.parameter import Parameter
 
 import neural_renderer
 
 
 class TestRasterize(unittest.TestCase):
-    def stest_forward_case1(self):
+    def test_forward_case1(self):
         # load reference image by blender
         ref = imageio.imread('./tests/data/teapot_blender.png')
         ref = (ref.min(-1) != 255).astype('float32')
@@ -26,9 +28,9 @@ class TestRasterize(unittest.TestCase):
         renderer.viewpoints = neural_renderer.get_points_from_angles(2.732, 0, 0)
         images = renderer.render_silhouettes(vertices, faces).data[target_num]
 
-        np.testing.assert_allclose(images, ref, atol=2e-3)
+        np.testing.assert_allclose(images.cpu().numpy(), ref.cpu().numpy(), atol=2e-3)
 
-    def stest_forward_case2(self):
+    def test_forward_case2(self):
         data = [
             [
                 './tests/data/4e49873292196f02574b5684eaec43e9/model.obj',
@@ -52,12 +54,13 @@ class TestRasterize(unittest.TestCase):
             vertices, faces, vertices_t, faces_t, textures = neural_renderer.to_gpu(
                 (vertices[None, :, :], faces, vertices_t[None, :, :], faces_t, textures[None, :, :, :]))
 
-            images = renderer.render(vertices, faces, vertices_t, faces_t, textures).data
+            images = renderer.render(vertices, faces, vertices_t, faces_t, textures)
+            images = images.cpu().numpy()
             image = images[0].transpose((1, 2, 0))
 
             np.testing.assert_allclose(ref, image, atol=1e-2)
 
-    def stest_forward_case3(self):
+    def test_forward_case3(self):
         # load reference image by blender
         ref = imageio.imread('./tests/data/teapot_depth.png')
         ref = ref.astype('float32') / 255.
@@ -76,7 +79,7 @@ class TestRasterize(unittest.TestCase):
         images = (images - images.min()) / (images.max() - images.min())
         # imageio.toimage(images.get()).save('./tests/data/teapot_depth.png')
 
-        np.testing.assert_allclose(images, ref, atol=2e-3)
+        np.testing.assert_allclose(images.cpu().numpy(), ref.cpu().numpy(), atol=2e-3)
 
     def test_forward_case4(self):
         # lights
@@ -127,11 +130,9 @@ class TestRasterize(unittest.TestCase):
         images = renderer.render_rgb(vertices, faces, vertices_t, faces_t, textures, lights=lights).data[target_num]
         images = images.cpu().numpy().transpose((1, 2, 0))
 
-        import pylab
-        pylab.imshow(images.cpu().numpy().transpose((1, 2, 0))[:, :, :3])
-        pylab.show()
+        pylab.imsave("test_rasterize_case4.jpg", images[:, :, :3] / images.max())
 
-    def stest_backward_case1(self):
+    def test_backward_case1(self):
         vertices = [
             [0.1, 0.1, 1.],
             [-0.1, 0.1, 1.],
@@ -139,12 +140,6 @@ class TestRasterize(unittest.TestCase):
             [0.1, -0.1, 1.],
         ]
         faces = [[0, 1, 2], [0, 2, 3]]
-        # vertices = [
-        #     [0.3, 0.4, 1.],
-        #     [-0.3, 0.6, 1.],
-        #     [-0.3, 0.62, 1.],
-        # ]
-        # faces = [[0, 1, 2]]
 
         ref = neural_renderer.imread('./tests/data/gradient.png')
         ref = 1 - ref
@@ -153,26 +148,29 @@ class TestRasterize(unittest.TestCase):
 
         vertices = np.array(vertices, 'float32')
         faces = np.array(faces, 'int32')
-        vertices, faces, ref = neural_renderer.to_gpu((vertices, faces, ref))
-        vertices = torch.as_tensor(vertices)
-        optimizer = torch.optim.Adam(0.003)
-        optimizer.setup(vertices)
+        vertices, faces = neural_renderer.to_gpu((vertices, faces))
+        vertices = Parameter(vertices, True)
+        faces = torch.as_tensor(faces)
+
+        optimizer = torch.optim.Adam([vertices], lr=0.005)
+        ref = torch.as_tensor(ref)
+
+        os.makedirs("tmp", exist_ok=True)
 
         for i in range(350):
-            images = neural_renderer.rasterize_silhouettes(
-                vertices()[None, :, :], faces, image_size=256, anti_aliasing=False)
+            images = neural_renderer.rasterize_silhouettes(vertices[None, :, :], faces,
+                                                           image_size=256, anti_aliasing=False)
             image = images[0]
-
             iou = torch.sum(image * ref) / torch.sum(image + ref - image * ref)
-            iou = 1 - iou
+            iou = torch.as_tensor(1, dtype=torch.float32, device=iou.device) - iou
             loss = iou
 
-            optimizer.target.cleargrads()
+            optimizer.zero_grad()
             loss.backward()
-            optimizer.update()
+            optimizer.step()
 
-            # imageio.toimage(image.data.get()).save('../tmp/t%d.png' % i)
-            # print i, loss.data, iou.data
+            pylab.imsave('tmp/t%d.png' % i, image.data.cpu().numpy())
+            print(i, loss.data, iou.data)
 
             if float(iou.data) < 0.01:
                 return
