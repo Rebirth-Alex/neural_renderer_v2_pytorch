@@ -12,7 +12,7 @@ import numpy as np
 import scipy.misc
 import tqdm
 
-import neural_renderer
+import neural_renderer_torch
 
 
 class Model(chainer.Link):
@@ -21,21 +21,21 @@ class Model(chainer.Link):
 
         with self.init_scope():
             # load .obj
-            vertices, faces = neural_renderer.load_obj(filename_obj)
+            vertices, faces = neural_renderer_torch.load_obj(filename_obj)
             self.vertices = vertices[None, :, :]
             self.faces = faces
 
             # create textures
-            vertices_t, faces_t, textures = neural_renderer.create_textures(self.faces.shape[0], texture_size=4)
+            vertices_t, faces_t, textures = neural_renderer_torch.create_textures(self.faces.shape[0], texture_size=4)
             self.vertices_t = vertices_t[None, :, :]
             self.faces_t = faces_t
             self.textures = chainer.Parameter(textures[None, :, :, :])
 
             # load reference image
-            self.image_ref = neural_renderer.imread(filename_ref)
+            self.image_ref = neural_renderer_torch.imread(filename_ref)
 
             # setup renderer
-            renderer = neural_renderer.Renderer()
+            renderer = neural_renderer_torch.Renderer()
             renderer.perspective = False
             self.renderer = renderer
 
@@ -48,7 +48,7 @@ class Model(chainer.Link):
         self.image_ref = chainer.cuda.to_gpu(self.image_ref, device)
 
     def __call__(self):
-        self.renderer.viewpoints = neural_renderer.get_points_from_angles(2.732, 0, np.random.uniform(0, 360))
+        self.renderer.viewpoints = neural_renderer_torch.get_points_from_angles(2.732, 0, np.random.uniform(0, 360))
         images = self.renderer.render_rgb(
             self.vertices, self.faces, self.vertices_t, self.faces_t, cf.tanh(self.textures))
         loss = cf.sum(cf.square(images[0] - self.image_ref.transpose((2, 0, 1))))
@@ -89,7 +89,7 @@ def run():
     loop = tqdm.tqdm(range(0, 360, 4))
     for num, azimuth in enumerate(loop):
         loop.set_description('Drawing')
-        model.renderer.viewpoints = neural_renderer.get_points_from_angles(2.732, 0, azimuth)
+        model.renderer.viewpoints = neural_renderer_torch.get_points_from_angles(2.732, 0, azimuth)
         images = model.renderer.render_rgb(
             model.vertices, model.faces, model.vertices_t, model.faces_t, cf.tanh(model.textures))
         image = images.data.get()[0].transpose((1, 2, 0))

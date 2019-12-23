@@ -10,7 +10,7 @@ import chainer
 import scipy.misc
 import tqdm
 
-import neural_renderer
+import neural_renderer_torch
 
 
 def run():
@@ -28,7 +28,7 @@ def run():
     # load .obj
     # vertices: [num_vertices, XYZ]
     # faces: # [num_faces, 3]
-    vertices, faces = neural_renderer.load_obj(args.filename_input)
+    vertices, faces = neural_renderer_torch.load_obj(args.filename_input)
     vertices = vertices[None, :, :]  #  -> [batch_size=1, num_vertices, XYZ]
 
     # to gpu
@@ -37,13 +37,13 @@ def run():
     faces = chainer.cuda.to_gpu(faces)
 
     # create renderer
-    renderer = neural_renderer.Renderer()
+    renderer = neural_renderer_torch.Renderer()
 
     # draw object
     loop = tqdm.tqdm(range(0, 360, 4))
     for num, azimuth in enumerate(loop):
         loop.set_description('Drawing')
-        renderer.viewpoints = neural_renderer.get_points_from_angles(camera_distance, elevation, azimuth)
+        renderer.viewpoints = neural_renderer_torch.get_points_from_angles(camera_distance, elevation, azimuth)
         images = renderer.render_silhouettes(vertices, faces)  # [batch_size, RGB, image_size, image_size]
         image = images.data.get()[0]  # [image_size, image_size]
         scipy.misc.toimage(image, cmin=0, cmax=1).save('%s/_tmp_%04d.png' % (working_directory, num))

@@ -6,7 +6,7 @@ import chainer
 import numpy as np
 import tqdm
 
-import neural_renderer
+import neural_renderer_torch
 
 
 def run():
@@ -24,11 +24,11 @@ def run():
     texture_size = 2
 
     # load .obj
-    vertices, faces = neural_renderer.load_obj(args.filename_input)
+    vertices, faces = neural_renderer_torch.load_obj(args.filename_input)
     vertices = vertices[None, :, :]  # [num_vertices, XYZ] -> [batch_size=1, num_vertices, XYZ]
 
     # create texture [batch_size=1, num_faces, texture_size, texture_size, texture_size, RGB]
-    vertices_t, faces_t, textures = neural_renderer.create_textures(faces.shape[0])
+    vertices_t, faces_t, textures = neural_renderer_torch.create_textures(faces.shape[0])
 
     # tile to minibatch
     vertices = np.tile(vertices, (args.batch_size, 1, 1))
@@ -44,7 +44,7 @@ def run():
     textures = chainer.Variable(chainer.cuda.to_gpu(textures))
 
     # create renderer
-    renderer = neural_renderer.Renderer()
+    renderer = neural_renderer_torch.Renderer()
     renderer.image_size = args.image_size
 
     # draw object
@@ -53,7 +53,7 @@ def run():
     loop = tqdm.tqdm(range(0, 360, 15))
     for num, azimuth in enumerate(loop):
         loop.set_description('Drawing')
-        renderer.viewpoints = neural_renderer.get_points_from_angles(camera_distance, elevation, azimuth)
+        renderer.viewpoints = neural_renderer_torch.get_points_from_angles(camera_distance, elevation, azimuth)
         time_start = time.time()
         images = renderer.render_silhouettes(vertices, faces)  # [batch_size, image_size, image_size]
         _ = images.data[0, 0, 0].get()
@@ -75,7 +75,7 @@ def run():
     loop = tqdm.tqdm(range(0, 360, 15))
     for num, azimuth in enumerate(loop):
         loop.set_description('Drawing')
-        renderer.viewpoints = neural_renderer.get_points_from_angles(camera_distance, elevation, azimuth)
+        renderer.viewpoints = neural_renderer_torch.get_points_from_angles(camera_distance, elevation, azimuth)
         time_start = time.time()
         images = renderer.render(vertices, faces, vertices_t, faces_t, textures)  # [batch_size, RGB, image_size, image_size]
         _ = images.data[0, 0, 0, 0].get()
