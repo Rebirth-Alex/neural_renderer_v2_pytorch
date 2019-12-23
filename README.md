@@ -10,7 +10,7 @@ For the original code, please visit [original repo](https://github.com/hiroharu-
 - Some improvements in project structure & applied refactoring
 - Maintained the original code under `neural_renderer_chainer` and tests under `tests_chainer`
 - PyTorch tests are comparing results against the Chainer implementation. 
-
+- Added support for multiple GPUs
 
 ## Installation
 ```
