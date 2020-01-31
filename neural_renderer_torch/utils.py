@@ -110,7 +110,7 @@ def to_map(data_in, indices):
     return data_out
 
 
-class MaskForeground(torch.nn.Module):
+class MaskForeground(torch.autograd.Function):
     """
     Test code:
     import chainer.gradient_check
@@ -130,19 +130,22 @@ class MaskForeground(torch.nn.Module):
         mask_foreground, (data_in, masks), grad_out, no_grads=(False, True), rtol=1e-2, atol=1e-03)
     """
 
-    def forward(self, data_in, face_index_map):
+    @staticmethod
+    def forward(ctx, data_in, face_index_map):
         data_in, face_index_map = data_in.contiguous(), face_index_map.contiguous()
         data_out = torch.zeros(data_in.shape, dtype=torch.float32, device=data_in.device).contiguous()
         for b in range(data_in.shape[0]):
             data_out[b][face_index_map[b] >= 0] = data_in[b][face_index_map[b] >= 0]
 
+        ctx.save_for_backward(data_in, face_index_map)
         return data_out
 
-    def backward(self, inputs, gradients):
-        print("rast backward")
-        face_index_map = inputs[1].contiguous()
-        grad_out = gradients[0].contiguous()
-        grad_in = torch.zeros(grad_out.shape, dtype=torch.float32).contiguous()
+    @staticmethod
+    def backward(ctx, gradients):
+        data_in, face_index_map = ctx.saved_tensors
+        face_index_map = face_index_map.contiguous()
+        grad_out = gradients.contiguous()
+        grad_in = torch.zeros(grad_out.shape, dtype=torch.float32, device=grad_out.device).contiguous()
         for b in range(grad_in.shape[0]):
             grad_in[b][face_index_map[b] >= 0] = grad_out[b][face_index_map[b] >= 0]
 
@@ -150,4 +153,4 @@ class MaskForeground(torch.nn.Module):
 
 
 def mask_foreground(data, face_index_map):
-    return MaskForeground()(data, face_index_map)
+    return MaskForeground().apply(data, face_index_map)

@@ -12,7 +12,7 @@ import numpy as np
 import scipy.misc
 import tqdm
 
-import neural_renderer_torch
+import neural_renderer
 
 
 class Model(chainer.Link):
@@ -21,7 +21,7 @@ class Model(chainer.Link):
 
         with self.init_scope():
             # load .obj
-            vertices, faces = neural_renderer_torch.load_obj(filename_obj)
+            vertices, faces = neural_renderer.load_obj(filename_obj)
             self.vertices = chainer.Parameter(vertices[None, :, :])
             self.faces = faces
 
@@ -29,7 +29,7 @@ class Model(chainer.Link):
             self.image_ref = scipy.misc.imread(filename_ref).astype('float32').mean(-1) / 255.
 
             # setup renderer
-            renderer = neural_renderer_torch.Renderer()
+            renderer = neural_renderer.Renderer()
             self.renderer = renderer
 
     def to_gpu(self, device=None):
@@ -38,7 +38,7 @@ class Model(chainer.Link):
         self.image_ref = chainer.cuda.to_gpu(self.image_ref, device)
 
     def __call__(self):
-        self.renderer.viewpoints = neural_renderer_torch.get_points_from_angles(2.732, 0, 90)
+        self.renderer.viewpoints = neural_renderer.get_points_from_angles(2.732, 0, 90)
         image = self.renderer.render_silhouettes(self.vertices, self.faces)
         loss = cf.sum(cf.square(image - self.image_ref[None, :, :]))
         return loss
@@ -85,7 +85,7 @@ def run():
     loop = tqdm.tqdm(range(0, 360, 4))
     for num, azimuth in enumerate(loop):
         loop.set_description('Drawing')
-        model.renderer.viewpoints = neural_renderer_torch.get_points_from_angles(2.732, 0, azimuth)
+        model.renderer.viewpoints = neural_renderer.get_points_from_angles(2.732, 0, azimuth)
         images = model.renderer.render_silhouettes(model.vertices, model.faces)
         image = images.data.get()[0]
         scipy.misc.toimage(image, cmin=0, cmax=1).save('%s/_tmp_%04d.png' % (working_directory, num))

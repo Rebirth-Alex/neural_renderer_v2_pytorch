@@ -12,7 +12,7 @@ import numpy as np
 import scipy.misc
 import tqdm
 
-import neural_renderer_torch
+import neural_renderer
 
 
 class Model(chainer.Link):
@@ -21,13 +21,13 @@ class Model(chainer.Link):
 
         with self.init_scope():
             # load .obj
-            vertices, faces = neural_renderer_torch.load_obj(filename_obj)
+            vertices, faces = neural_renderer.load_obj(filename_obj)
             self.vertices = vertices[None, :, :]
             self.faces = faces
 
             # load reference image
             if filename_ref is not None:
-                self.image_ref = neural_renderer_torch.imread(filename_ref)
+                self.image_ref = neural_renderer.imread(filename_ref)
             else:
                 self.image_ref = None
 
@@ -35,7 +35,7 @@ class Model(chainer.Link):
             self.camera_position = chainer.Parameter(np.array([6, 10, -14], 'float32'))
 
             # setup renderer
-            renderer = neural_renderer_torch.Renderer()
+            renderer = neural_renderer.Renderer()
             renderer.viewpoints = self.camera_position
             self.renderer = renderer
 
@@ -64,7 +64,7 @@ def make_reference_image(filename_ref, filename_obj):
     model = Model(filename_obj)
     model.to_gpu()
 
-    model.renderer.viewpoints = neural_renderer_torch.get_points_from_angles(2.732, 30, -15)
+    model.renderer.viewpoints = neural_renderer.get_points_from_angles(2.732, 30, -15)
     images = model.renderer.render_silhouettes(model.vertices, model.faces)
     image = images.data.get()[0]
     scipy.misc.toimage(image, cmin=0, cmax=1).save(filename_ref)
