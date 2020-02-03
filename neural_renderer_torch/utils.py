@@ -1,5 +1,3 @@
-import math
-
 import imageio
 import numpy as np
 import torch
@@ -41,24 +39,19 @@ def create_textures(num_faces, texture_size=16, flatten=False):
     return vertices, faces, textures
 
 
-def radians(degrees):
-    pi = 3.14159265359
-    return degrees / 180. * pi
-
-
 def get_points_from_angles(distance, elevation, azimuth, degrees=True):
-    if isinstance(distance, float) or isinstance(distance, int):
+    if isinstance(distance, np.float32) or isinstance(distance, np.int32):
         if degrees:
-            elevation = math.radians(elevation)
-            azimuth = math.radians(azimuth)
+            elevation = np.radians(elevation)
+            azimuth = np.radians(azimuth)
         return (
-            distance * math.cos(elevation) * math.sin(azimuth),
-            distance * math.sin(elevation),
-            -distance * math.cos(elevation) * math.cos(azimuth))
+            distance * np.cos(elevation) * np.sin(azimuth),
+            distance * np.sin(elevation),
+            -distance * np.cos(elevation) * np.cos(azimuth))
     else:
         if degrees:
-            elevation = radians(elevation)
-            azimuth = radians(azimuth)
+            elevation = elevation / 180. * 3.14159265359
+            azimuth = azimuth / 180. * 3.14159265359
         return torch.stack([
             distance * torch.cos(elevation) * torch.sin(azimuth),
             distance * torch.sin(elevation),

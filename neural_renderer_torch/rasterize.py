@@ -1,11 +1,10 @@
 import torch
 import torch.nn.functional as F
-from neural_renderer_torch.cuda.rasterize_cuda import face_index_map_forward_safe, \
-    face_index_map_forward_unsafe, compute_weight_map_c
 
 from . import lights as light_lib, differentiation
+from .cuda.rasterize_cuda import face_index_map_forward_safe, face_index_map_forward_unsafe, compute_weight_map_c
 from .rasterize_param import RasterizeParam, RasterizeHyperparam
-from .utils import pad_zeros, maximum, to_map, mask_foreground
+from .utils import to_map, mask_foreground
 
 
 #######################################################################################################################
@@ -111,12 +110,12 @@ def sample_textures(faces, faces_textures, textures, face_index_map, weight_map,
     textures = torch.reshape(textures, (batch_size, texture_height * texture_width, 3))  # [bs, h * w, 3]
     faces_z_map = to_map(faces[:, :, :, 2], face_index_map)  # [bs, is, is, 3]
     vertices_textures_map = to_map(faces_textures, face_index_map)  # [bs, is, is, 3, 2]
-    depth_map = 1. / (weight_map / faces_z_map).sum(-1)  # [bs, is, is]
+    depth_map = 1. / (weight_map / (faces_z_map + 1e-10) + 1e-10).sum(-1)  # [bs, is, is]
 
     # -> [bs, is, is, 2]
     vertices_textures_map_original = vertices_textures_map.clone()
     vertices_textures_map = (
-            weight_map[:, :, :, :, None] * vertices_textures_map / faces_z_map[:, :, :, :, None]).sum(-2)
+            weight_map[:, :, :, :, None] * vertices_textures_map / (faces_z_map[:, :, :, :, None] + 1e-10)).sum(-2)
     vertices_textures_map = vertices_textures_map * depth_map[:, :, :, None]  # [bs, is, is, 2]
     vertices_textures_map = torch.max(vertices_textures_map, vertices_textures_map_original.min(-2).values)
     vertices_textures_map = torch.min(vertices_textures_map, vertices_textures_map_original.max(-2).values - eps)

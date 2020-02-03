@@ -1,7 +1,7 @@
 import math
 
-import neural_renderer_torch
-from neural_renderer_torch.rasterize_param import RasterizeParam, RasterizeHyperparam
+from . import look_at, look, perspective, rasterize_silhouettes, rasterize_rgba, rasterize_rgb, rasterize_depth
+from .rasterize_param import RasterizeParam, RasterizeHyperparam
 
 
 class Renderer(object):
@@ -24,13 +24,13 @@ class Renderer(object):
     def transform_vertices(self, vertices, lights=None):
         # viewpoint transformation
         if self.camera_mode == 'look_at':
-            vertices = neural_renderer_torch.look_at(vertices, self.viewpoints)
+            vertices = look_at(vertices, self.viewpoints)
         elif self.camera_mode == 'look':
-            vertices = neural_renderer_torch.look(vertices, self.viewpoints, self.camera_direction)
+            vertices = look(vertices, self.viewpoints, self.camera_direction)
 
         # perspective transformation
         if self.perspective:
-            vertices = neural_renderer_torch.perspective(vertices, angle=self.viewing_angle)
+            vertices = perspective(vertices, angle=self.viewing_angle)
 
         return vertices
 
@@ -42,7 +42,7 @@ class Renderer(object):
                                           far=self.far, anti_aliasing=self.anti_aliasing,
                                           draw_backside=self.draw_backside)
 
-        images = neural_renderer_torch.rasterize_silhouettes(vertices, faces, params, hyperparams)
+        images = rasterize_silhouettes(vertices, faces, params, hyperparams)
         return images
 
     def render(self, vertices, faces, vertices_t, faces_t, textures, backgrounds=None, lights=None):
@@ -52,7 +52,7 @@ class Renderer(object):
         hyperparams = RasterizeHyperparam(image_size=self.image_size, near=self.near, far=self.far,
                                           anti_aliasing=self.anti_aliasing, draw_backside=self.draw_backside)
 
-        images = neural_renderer_torch.rasterize_rgba(vertices, faces, params, hyperparams)
+        images = rasterize_rgba(vertices, faces, params, hyperparams)
         return images
 
     def render_rgb(self, vertices, faces, vertices_t, faces_t, textures, backgrounds=None, lights=None):
@@ -62,7 +62,7 @@ class Renderer(object):
         hyperparams = RasterizeHyperparam(image_size=self.image_size, near=self.near, far=self.far,
                                           anti_aliasing=self.anti_aliasing, draw_backside=self.draw_backside)
 
-        images = neural_renderer_torch.rasterize_rgb(vertices, faces, params, hyperparams)
+        images = rasterize_rgb(vertices, faces, params, hyperparams)
         return images
 
     def render_depth(self, vertices, faces, backgrounds=None):
@@ -71,5 +71,5 @@ class Renderer(object):
         hyperparams = RasterizeHyperparam(image_size=self.image_size, near=self.near, far=self.far,
                                           anti_aliasing=self.anti_aliasing, draw_backside=self.draw_backside)
 
-        images = neural_renderer_torch.rasterize_depth(vertices, faces, params, hyperparams)
+        images = rasterize_depth(vertices, faces, params, hyperparams)
         return images

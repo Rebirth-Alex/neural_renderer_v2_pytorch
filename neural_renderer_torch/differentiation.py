@@ -1,6 +1,6 @@
 import torch
 
-from neural_renderer_torch.utils import pad_zeros, maximum
+from .utils import pad_zeros, maximum
 
 
 class Differentiation(torch.autograd.Function):

@@ -1,7 +1,7 @@
 import torch
 import torch.nn as nn
 
-from neural_renderer_torch import load_obj
+from . import load_obj
 
 
 class Mesh(nn.Module):
