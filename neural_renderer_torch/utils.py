@@ -40,7 +40,7 @@ def create_textures(num_faces, texture_size=16, flatten=False):
 
 
 def get_points_from_angles(distance, elevation, azimuth, degrees=True):
-    if isinstance(distance, np.float32) or isinstance(distance, np.int32):
+    if isinstance(distance, float) or isinstance(distance, int):
         if degrees:
             elevation = np.radians(elevation)
             azimuth = np.radians(azimuth)

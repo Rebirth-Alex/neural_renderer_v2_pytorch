@@ -9,5 +9,6 @@ from .rasterize import rasterize_silhouettes, rasterize_rgba, rasterize_rgb, ras
 from .renderer import Renderer
 from .save_obj import save_obj
 from .utils import to_gpu, imread, create_textures, get_points_from_angles
+from .differentiation import differentiation
 
 __version__ = '2.0.2'

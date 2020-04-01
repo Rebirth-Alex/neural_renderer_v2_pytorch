@@ -690,7 +690,7 @@ def rasterize_all(
 
         if lights is not None:
             normal_map = compute_normal_map(vertices, face_indices, faces, face_index_map, weight_map)
-            color_weight_map = chainer.Variable(cp.zeros_like(normal_map, 'float32'))
+            color_weight_map = chainer.Variable(cp.zeros_like(normal_map.data, 'float32'))
             for light in lights:
                 if isinstance(light, light_lib.AmbientLight):
                     color_weight_map += cf.broadcast_to(light.color[:, None, None, :], color_weight_map.shape)
