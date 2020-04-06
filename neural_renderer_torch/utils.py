@@ -11,7 +11,7 @@ def to_gpu(data, device=None):
 
 
 def imread(filename):
-    return imageio.imread(filename).astype('float32') / 255.
+    return np.asarray(imageio.imread(filename), dtype='float32') / 255.
 
 
 def create_textures(num_faces, texture_size=16, flatten=False):
@@ -76,16 +76,14 @@ def pad_zeros(x, size, axis, side='both'):
 
 
 def maximum(data_right, data_left, eps=1e-4):
-    max_map = torch.max(data_left, data_right) <= 0
-    min_map = torch.abs(data_right - data_left) < eps
+    max_map = torch.max(data_right, data_left) <= 0
+    abs_map = torch.abs(data_right - data_left) < eps
     rl_map = data_right > data_left
-    else_map = ~(max_map | min_map | rl_map)
 
-    data3 = torch.zeros_like(data_right)
-    data3[max_map] = 0
-    data3[min_map] = 0
+    data3 = data_left.clone()
     data3[rl_map] = -data_right[rl_map]
-    data3[else_map] = data_left[else_map]
+    data3[abs_map] = 0
+    data3[max_map] = 0
 
     return data3
 
