@@ -1,95 +1,111 @@
-"""
-Example 2. Optimizing vertices.
-"""
 import argparse
-import glob
 import os
-import subprocess
 
-import chainer
-import chainer.functions as cf
 import numpy as np
-import scipy.misc
+import torch
 import tqdm
+from PIL import Image
 
-import neural_renderer
+import neural_renderer_torch
+from neural_renderer_torch.utils import make_gif, imread
+
+CAMERA_DISTANCE = 2.732
+ELEVATION = 0
+AZIMUTH = 90
 
 
-class Model(chainer.Link):
-    def __init__(self, filename_obj, filename_ref):
+class Model(torch.nn.Module):
+    def __init__(self, input_obj_file, input_ref_file):
         super(Model, self).__init__()
 
-        with self.init_scope():
-            # load .obj
-            vertices, faces = neural_renderer.load_obj(filename_obj)
-            self.vertices = chainer.Parameter(vertices[None, :, :])
-            self.faces = faces
+        # Load the OBJ file.
+        vertices, faces = neural_renderer_torch.load_obj(input_obj_file)
+        self.vertices = torch.nn.Parameter(torch.as_tensor(vertices[None, :, :]))
+        self.faces = torch.as_tensor(faces)
 
-            # load reference image
-            self.image_ref = scipy.misc.imread(filename_ref).astype('float32').mean(-1) / 255.
+        # Load the reference image.
+        self.image_ref = torch.as_tensor(imread(input_ref_file).mean(-1) / 255.)
 
-            # setup renderer
-            renderer = neural_renderer.Renderer()
-            self.renderer = renderer
+        # Set up the renderer.
+        renderer = neural_renderer_torch.Renderer()
+        self.renderer = renderer
 
-    def to_gpu(self, device=None):
-        super(Model, self).to_gpu(device)
-        self.faces = chainer.cuda.to_gpu(self.faces, device)
-        self.image_ref = chainer.cuda.to_gpu(self.image_ref, device)
+    def to(self, device=None):
+        super(Model, self).to(device)
+        self.faces = self.faces.to(device)
+        self.image_ref = self.image_ref.to(device)
 
     def __call__(self):
-        self.renderer.viewpoints = neural_renderer.get_points_from_angles(2.732, 0, 90)
+        self.renderer.viewpoints = neural_renderer_torch.get_points_from_angles(
+            CAMERA_DISTANCE, ELEVATION, AZIMUTH)
         image = self.renderer.render_silhouettes(self.vertices, self.faces)
-        loss = cf.sum(cf.square(image - self.image_ref[None, :, :]))
+        loss = torch.sum(torch.pow(image - self.image_ref[None, :, :], 2))
         return loss
 
 
-def make_gif(working_directory, filename):
-    # generate gif (need ImageMagick)
-    options = '-delay 8 -loop 0 -layers optimize'
-    subprocess.call('convert %s %s/_tmp_*.png %s' % (options, working_directory, filename), shell=True)
-    for filename in glob.glob('%s/_tmp_*.png' % working_directory):
-        os.remove(filename)
+def parse_arguments():
+    parser = argparse.ArgumentParser()
+    parser.add_argument('-io', '--input_obj_file', type=str, default='./examples_pytorch/data/teapot.obj')
+    parser.add_argument('-ir', '--input_ref_file', type=str, default='./examples_pytorch/data/example2_ref.png')
+    parser.add_argument('-oo', '--output_opt_file', type=str, default='./examples_pytorch/data/example2_opt.gif')
+    parser.add_argument('-or', '--output_res_file', type=str, default='./examples_pytorch/data/example2_res.gif')
+    parser.add_argument('-g', '--gpu', type=int, default=0)
+    args = parser.parse_args()
+    return args
 
 
 def run():
-    parser = argparse.ArgumentParser()
-    parser.add_argument('-io', '--filename_obj', type=str, default='./examples/data/teapot.obj')
-    parser.add_argument('-ir', '--filename_ref', type=str, default='./examples/data/example2_ref.png')
-    parser.add_argument(
-        '-oo', '--filename_output_optimization', type=str, default='./examples/data/example2_optimization.gif')
-    parser.add_argument(
-        '-or', '--filename_output_result', type=str, default='./examples/data/example2_result.gif')
-    parser.add_argument('-g', '--gpu', type=int, default=0)
-    args = parser.parse_args()
-    working_directory = os.path.dirname(args.filename_output_result)
+    args = parse_arguments()
+    working_dir = os.path.dirname(args.output_res_file)
 
-    model = Model(args.filename_obj, args.filename_ref)
-    model.to_gpu()
+    # Currently, only .obj files are supported.
+    if not args.input_obj_file.endswith('.obj'):
+        raise RuntimeError('Only .obj files are currently supported as input.')
 
-    optimizer = chainer.optimizers.Adam()
-    optimizer.setup(model)
+    model = Model(args.input_obj_file, args.input_ref_file)
+    model.to(args.gpu)
+
+    # Create the optimizer object.
+    optimizer = torch.optim.Adam(model.parameters())
+
+    # Run the optimization loop.
     loop = tqdm.tqdm(range(300))
     for i in loop:
         loop.set_description('Optimizing')
-        optimizer.target.cleargrads()
+        optimizer.zero_grad()
         loss = model()
         loss.backward()
-        optimizer.update()
-        images = model.renderer.render_silhouettes(model.vertices, model.faces)
-        image = images.data.get()[0]
-        scipy.misc.toimage(image, cmin=0, cmax=1).save('%s/_tmp_%04d.png' % (working_directory, i))
-    make_gif(working_directory, args.filename_output_optimization)
+        optimizer.step()
 
-    # draw object
+        # Scale each frame to the [0, 255] interval.
+        image = model.renderer.render_silhouettes(model.vertices, model.faces)
+        image = image.detach()[0].cpu().numpy()
+        min_val, max_val = image.min(), image.max()
+        image = (image - min_val) / (max_val - min_val) * 255
+
+        # Save each frame to the working directory.
+        image = Image.fromarray(image.astype(np.uint8))
+        image.save('%s/_tmp_%04d.png' % (working_dir, i))
+
+    make_gif(working_dir, args.output_opt_file)
+
+    # Run the rendering loop.
     loop = tqdm.tqdm(range(0, 360, 4))
     for num, azimuth in enumerate(loop):
-        loop.set_description('Drawing')
-        model.renderer.viewpoints = neural_renderer.get_points_from_angles(2.732, 0, azimuth)
-        images = model.renderer.render_silhouettes(model.vertices, model.faces)
-        image = images.data.get()[0]
-        scipy.misc.toimage(image, cmin=0, cmax=1).save('%s/_tmp_%04d.png' % (working_directory, num))
-    make_gif(working_directory, args.filename_output_result)
+        loop.set_description('Rendering')
+        model.renderer.viewpoints = neural_renderer_torch.get_points_from_angles(CAMERA_DISTANCE, ELEVATION, azimuth)
+
+        # Scale each frame to the [0, 255] interval.
+        image = model.renderer.render_silhouettes(model.vertices, model.faces)
+        image = image.detach()[0].cpu().numpy()
+        min_val, max_val = image.min(), image.max()
+        image = (image - min_val) / (max_val - min_val) * 255
+
+        # Save each frame to the working directory.
+        image = Image.fromarray(image.astype(np.uint8))
+        image.save('%s/_tmp_%04d.png' % (working_dir, num))
+
+    make_gif(working_dir, args.output_res_file)
 
 
 if __name__ == '__main__':

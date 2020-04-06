@@ -1,9 +1,20 @@
+import glob
 import math
+import os
+import subprocess
 
 import chainer
 import chainer.functions as cf
 import imageio
 import numpy as np
+
+
+def make_gif(working_directory, filename):
+    options = '-delay 8 -loop 0 -layers optimize'
+    subprocess.call('convert %s %s/_tmp_*.png %s' %
+                    (options, working_directory, filename), shell=True)
+    for filename in glob.glob('%s/_tmp_*.png' % working_directory):
+        os.remove(filename)
 
 
 def to_gpu(data, device=None):
@@ -14,7 +25,7 @@ def to_gpu(data, device=None):
 
 
 def imread(filename):
-    return imageio.imread(filename).astype('float32') / 255.
+    return imageio.imread(filename).astype('float32')
 
 
 def create_textures(num_faces, texture_size=16, flatten=False):
