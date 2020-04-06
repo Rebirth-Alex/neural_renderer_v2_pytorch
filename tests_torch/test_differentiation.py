@@ -19,10 +19,9 @@ class TestDifferentiation(unittest.TestCase):
         noise = np.random.normal(size=(10, 32, 32, 3)).astype('float32')
         step = 2 / 32.
 
-        device = torch.device('cuda:0')
-        images = torch.tensor(images, device=device)
-        coordinates = torch.tensor(coordinates, device=device, requires_grad=True)
-        noise = torch.tensor(noise, device=device)
+        images = neural_renderer_torch.to_gpu(images)
+        coordinates = torch.tensor(coordinates, device=images.device, requires_grad=True)
+        noise = neural_renderer_torch.to_gpu(noise)
 
         loss = torch.sum(neural_renderer_torch.differentiation(images, coordinates) * noise)
         loss.backward()
