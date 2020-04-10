@@ -23,7 +23,7 @@ def to_gpu(data, device=None):
 
 
 def imread(filename):
-    image = np.asarray(imageio.imread(filename), dtype='float32')
+    image = np.asarray(imageio.imread(filename), dtype='float32') / 255.
     return image
 
 
