@@ -24,7 +24,7 @@ class Model(torch.nn.Module):
         self.faces = torch.as_tensor(faces)
 
         # Load the reference image.
-        self.image_ref = torch.as_tensor(imread(input_ref_file).mean(-1) / 255.)
+        self.image_ref = torch.as_tensor(imread(input_ref_file).mean(-1))
 
         # Set up the renderer.
         renderer = neural_renderer_torch.Renderer()
