@@ -97,7 +97,7 @@ def run():
     image.save('%s/example4_init.png' % working_dir)
 
     # Run the optimization loop.
-    optimizer = torch.optim.Adam(model.parameters())
+    optimizer = torch.optim.Adam(model.parameters(), lr=0.1)
 
     # Run the optimization loop.
     loop = tqdm.tqdm(range(1000))
