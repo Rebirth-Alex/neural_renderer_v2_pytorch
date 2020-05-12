@@ -10,7 +10,7 @@ import numpy as np
 
 
 def make_gif(working_directory, filename):
-    options = '-delay 8 -loop 0 -layers optimize'
+    options = '-delay 8 -loop 0'
     subprocess.call('convert %s %s/_tmp_*.png %s' %
                     (options, working_directory, filename), shell=True)
     for filename in glob.glob('%s/_tmp_*.png' % working_directory):
