@@ -2,110 +2,126 @@
 Example 4. Finding camera parameters.
 """
 import argparse
-import glob
 import os
-import subprocess
 
-import chainer
-import chainer.functions as cf
 import numpy as np
-import scipy.misc
+import torch
 import tqdm
+from PIL import Image
 
-import neural_renderer
+import neural_renderer_torch
+from neural_renderer_torch.utils import make_gif
 
 
-class Model(chainer.Link):
-    def __init__(self, filename_obj, filename_ref=None):
+class Model(torch.nn.Module):
+    def __init__(self, input_obj_file, input_ref_file=None):
         super(Model, self).__init__()
 
-        with self.init_scope():
-            # load .obj
-            vertices, faces = neural_renderer.load_obj(filename_obj)
-            self.vertices = vertices[None, :, :]
-            self.faces = faces
+        # Load the OBJ file.
+        vertices, faces = neural_renderer_torch.load_obj(input_obj_file)
+        self.vertices = torch.as_tensor(vertices[None, :, :])
+        self.faces = torch.as_tensor(faces)
 
-            # load reference image
-            if filename_ref is not None:
-                self.image_ref = neural_renderer.imread(filename_ref)
-            else:
-                self.image_ref = None
+        # Load the reference image.
+        if input_ref_file is not None:
+            self.image_ref = torch.as_tensor(neural_renderer_torch.imread(input_ref_file))
+        else:
+            self.image_ref = None
 
-            # camera parameters
-            self.camera_position = chainer.Parameter(np.array([6, 10, -14], 'float32'))
+        # Set up the camera parameters.
+        self.camera_position = torch.nn.Parameter(torch.tensor([6, 10, -14], dtype=torch.float32))
 
-            # setup renderer
-            renderer = neural_renderer.Renderer()
-            renderer.viewpoints = self.camera_position
-            self.renderer = renderer
+        # Set up the renderer.
+        renderer = neural_renderer_torch.Renderer()
+        renderer.viewpoints = self.camera_position
+        self.renderer = renderer
 
-    def to_gpu(self, device=None):
-        super(Model, self).to_gpu(device)
-        self.faces = chainer.cuda.to_gpu(self.faces, device)
-        self.vertices = chainer.cuda.to_gpu(self.vertices, device)
+    def to(self, device=None):
+        super(Model, self).to(device)
+        self.faces = self.faces.to(device)
+        self.vertices = self.vertices.to(device)
         if self.image_ref is not None:
-            self.image_ref = chainer.cuda.to_gpu(self.image_ref)
+            self.image_ref = self.image_ref.to(device)
 
     def __call__(self):
         image = self.renderer.render_silhouettes(self.vertices, self.faces)
-        loss = cf.sum(cf.square(image - self.image_ref[None, :, :]))
+        loss = torch.sum(torch.pow(image - self.image_ref[None, :, :], 2))
         return loss
 
 
-def make_gif(working_directory, filename):
-    # generate gif (need ImageMagick)
-    options = '-delay 8 -loop 0 -layers optimize -dispose previous'
-    subprocess.call('convert %s %s/_tmp_*.png %s' % (options, working_directory, filename), shell=True)
-    for filename in glob.glob('%s/_tmp_*.png' % working_directory):
-        os.remove(filename)
+def make_ref_image(input_ref_file, input_obj_file, gpu):
+    model = Model(input_obj_file)
+    model.to(gpu)
 
-
-def make_reference_image(filename_ref, filename_obj):
-    model = Model(filename_obj)
-    model.to_gpu()
-
-    model.renderer.viewpoints = neural_renderer.get_points_from_angles(2.732, 30, -15)
+    model.renderer.viewpoints = neural_renderer_torch.get_points_from_angles(2.732, 30, -15)
     images = model.renderer.render_silhouettes(model.vertices, model.faces)
-    image = images.data.get()[0]
-    scipy.misc.toimage(image, cmin=0, cmax=1).save(filename_ref)
+    image = images.detach()[0].cpu().numpy()
+    min_val, max_val = image.min(), image.max()
+    image = (image - min_val) / (max_val - min_val) * 255
+
+    image = Image.fromarray(image.astype(np.uint8))
+    image.save(input_ref_file)
+
+
+def parse_arguments():
+    parser = argparse.ArgumentParser()
+    parser.add_argument('-io', '--input_obj_file', type=str, default='./examples_pytorch/data/teapot.obj')
+    parser.add_argument('-ir', '--input_ref_file', type=str, default='./examples_pytorch/data/example4_ref.png')
+    parser.add_argument('-or', '--output_res_file', type=str, default='./examples_pytorch/data/example4_res.gif')
+    parser.add_argument('-mr', '--make_ref_image', type=int, default=0)
+    parser.add_argument('-g', '--gpu', type=int, default=0)
+    args = parser.parse_args()
+    return args
 
 
 def run():
-    parser = argparse.ArgumentParser()
-    parser.add_argument('-io', '--filename_obj', type=str, default='./examples/data/teapot.obj')
-    parser.add_argument('-ir', '--filename_ref', type=str, default='./examples/data/example4_ref.png')
-    parser.add_argument('-or', '--filename_output', type=str, default='./examples/data/example4_result.gif')
-    parser.add_argument('-mr', '--make_reference_image', type=int, default=0)
-    parser.add_argument('-g', '--gpu', type=int, default=0)
-    args = parser.parse_args()
-    working_directory = os.path.dirname(args.filename_output)
+    args = parse_arguments()
+    working_dir = os.path.dirname(args.output_res_file)
 
-    if args.make_reference_image:
-        make_reference_image(args.filename_ref, args.filename_obj)
+    # Currently, only .obj files are supported.
+    if not args.input_obj_file.endswith('.obj'):
+        raise RuntimeError('Only .obj files are currently supported as input.')
 
-    model = Model(args.filename_obj, args.filename_ref)
-    model.to_gpu()
+    if args.make_ref_image:
+        make_ref_image(args.input_ref_file, args.input_obj_file)
 
-    # draw initial image
+    model = Model(args.input_obj_file, args.input_ref_file)
+    model.to(args.gpu)
+
+    # Render an initial image.
     images = model.renderer.render_silhouettes(model.vertices, model.faces)
-    image = images.data.get()[0]
-    scipy.misc.toimage(image, cmin=0, cmax=1).save('%s/example4_init.png' % working_directory)
+    image = images.detach()[0].cpu().numpy()
+    min_val, max_val = image.min(), image.max()
+    image = (image - min_val) / (max_val - min_val) * 255
+    image = Image.fromarray(image.astype(np.uint8))
+    image.save('%s/example4_init.png' % working_dir)
 
-    optimizer = chainer.optimizers.Adam(alpha=0.1)
-    optimizer.setup(model)
+    # Run the optimization loop.
+    optimizer = torch.optim.Adam(model.parameters(), lr=0.1)
+
+    # Run the optimization loop.
     loop = tqdm.tqdm(range(1000))
     for i in loop:
-        optimizer.target.cleargrads()
+        optimizer.zero_grad()
         loss = model()
         loss.backward()
-        optimizer.update()
+        optimizer.step()
+
+        # Scale each frame to the [0, 255] interval.
         images = model.renderer.render_silhouettes(model.vertices, model.faces)
-        image = images.data.get()[0]
-        scipy.misc.toimage(image, cmin=0, cmax=1).save('%s/_tmp_%04d.png' % (working_directory, i))
+        image = images.detach()[0].cpu().numpy()
+        min_val, max_val = image.min(), image.max()
+        image = (image - min_val) / (max_val - min_val) * 255
+
+        # Save each frame to the working directory.
+        image = Image.fromarray(image.astype(np.uint8))
+        image.save('%s/_tmp_%04d.png' % (working_dir, i))
+
         loop.set_description('Optimizing (loss %.4f)' % loss.data)
         if loss.data < 70:
             break
-    make_gif(working_directory, args.filename_output)
+
+    make_gif(working_dir, args.output_res_file)
 
 
 if __name__ == '__main__':

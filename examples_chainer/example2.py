@@ -26,7 +26,7 @@ class Model(chainer.Link):
             self.faces = faces
 
             # load reference image
-            self.image_ref = scipy.misc.imread(filename_ref).astype('float32').mean(-1) / 255.
+            self.image_ref = scipy.misc.imread(filename_ref).astype('float32').mean(-1)
 
             # setup renderer
             renderer = neural_renderer.Renderer()

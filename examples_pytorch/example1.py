@@ -2,59 +2,74 @@
 Example 1. Drawing a teapot from multiple viewpoints.
 """
 import argparse
-import glob
 import os
-import subprocess
 
-import chainer
-import scipy.misc
+import numpy as np
+import torch
 import tqdm
+from PIL import Image
 
-import neural_renderer
+import neural_renderer_torch
+from neural_renderer_torch.utils import make_gif
+
+CAMERA_DISTANCE = 2.732
+ELEVATION = 30
+
+
+def parse_arguments():
+    parser = argparse.ArgumentParser()
+    parser.add_argument('-i', '--input_file', type=str, default='./examples_pytorch/data/teapot.obj')
+    parser.add_argument('-o', '--output_file', type=str, default='./examples_pytorch/data/example1.gif')
+    parser.add_argument('-g', '--gpu', type=int, default=0)
+    args = parser.parse_args()
+    return args
 
 
 def run():
-    parser = argparse.ArgumentParser()
-    parser.add_argument('-i', '--filename_input', type=str, default='./examples/data/teapot.obj')
-    parser.add_argument('-o', '--filename_output', type=str, default='./examples/data/example1.gif')
-    parser.add_argument('-g', '--gpu', type=int, default=0)
-    args = parser.parse_args()
-    working_directory = os.path.dirname(args.filename_output)
+    args = parse_arguments()
+    working_dir = os.path.dirname(args.output_file)
 
-    # other settings
-    camera_distance = 2.732
-    elevation = 30
+    # Currently, only .obj files are supported.
+    if not args.input_file.endswith('.obj'):
+        raise RuntimeError('Only .obj files are currently supported as input.')
 
-    # load .obj
-    # vertices: [num_vertices, XYZ]
-    # faces: # [num_faces, 3]
-    vertices, faces = neural_renderer.load_obj(args.filename_input)
-    vertices = vertices[None, :, :]  #  -> [batch_size=1, num_vertices, XYZ]
+    # Load the input data:
+    #    vertices: [num_vertices, 3]
+    #    faces: # [num_faces, 3]
+    vertices, faces = neural_renderer_torch.load_obj(args.input_file)
 
-    # to gpu
-    chainer.cuda.get_device_from_id(args.gpu).use()
-    vertices = chainer.cuda.to_gpu(vertices)
-    faces = chainer.cuda.to_gpu(faces)
+    # Add a batch size of 1:
+    #    vertices: [1, num_vertices, 3]
+    vertices = vertices[None, :, :]
 
-    # create renderer
-    renderer = neural_renderer.Renderer()
+    # Upload the data to the GPU.
+    device = torch.device('cuda:' + str(args.gpu))
+    torch.cuda.set_device(device)
 
-    # draw object
+    vertices = torch.tensor(vertices, device=device)
+    faces = torch.tensor(faces, device=device)
+
+    # Create the renderer object.
+    renderer = neural_renderer_torch.Renderer()
+
+    # Run the rendering loop.
     loop = tqdm.tqdm(range(0, 360, 4))
+
     for num, azimuth in enumerate(loop):
-        loop.set_description('Drawing')
-        renderer.viewpoints = neural_renderer.get_points_from_angles(camera_distance, elevation, azimuth)
-        images = renderer.render_silhouettes(vertices, faces)  # [batch_size, RGB, image_size, image_size]
-        image = images.data.get()[0]  # [image_size, image_size]
-        scipy.misc.toimage(image, cmin=0, cmax=1).save('%s/_tmp_%04d.png' % (working_directory, num))
+        loop.set_description('Rendering')
+        renderer.viewpoints = neural_renderer_torch.get_points_from_angles(
+            CAMERA_DISTANCE, ELEVATION, azimuth)
 
-    # generate gif (need ImageMagick)
-    options = '-delay 8 -loop 0 -layers optimize'
-    subprocess.call('convert %s %s/_tmp_*.png %s' % (options, working_directory, args.filename_output), shell=True)
+        # Scale each frame to the [0, 255] interval.
+        image = renderer.render_silhouettes(vertices, faces)[0].cpu().numpy()
+        min_val, max_val = image.min(), image.max()
+        image = (image - min_val) / (max_val - min_val) * 255
 
-    # remove temporary files
-    for filename in glob.glob('%s/_tmp_*.png' % working_directory):
-        os.remove(filename)
+        # Save each frame to the working directory.
+        image = Image.fromarray(image.astype(np.uint8))
+        image.save('%s/_tmp_%04d.png' % (working_dir, num))
+
+    make_gif(working_dir, args.output_file)
 
 
 if __name__ == '__main__':
